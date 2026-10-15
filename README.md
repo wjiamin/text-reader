@@ -70,6 +70,23 @@ another port, `--no-phone` to allow only this computer, `-o FOLDER` to save
 audiobooks somewhere else, and `--no-browser` to not open the page
 automatically. For example: `ao3-reader web --port 8080`.
 
+## Fic Listener: reading on your phone, no computer
+
+`phone/index.html` is a page that runs entirely on your phone. Download a work
+from AO3 with **Download → EPUB**, save it to Files, and open it in the page.
+It cleans the text up the same way, reads it with your phone's own voices,
+and remembers your place down to the paragraph. Tap any paragraph to read from
+there. Stories stay on the phone.
+
+For the most natural sound on an iPhone, download an *Enhanced* or *Premium*
+voice in Settings → Accessibility → Spoken Content → Voices, then pick it
+under "Voice and settings".
+
+The catch: iPhones stop web pages from talking when the screen locks, so it
+keeps the screen on while it reads. There's an experimental setting that tries
+to keep going with the screen locked; whether it works depends on the phone.
+To listen with the phone in your pocket, use the audiobook made on a computer.
+
 ## Making an audiobook from the command line
 
 If you'd rather not use the web page:
@@ -174,3 +191,7 @@ The code is in `src/ao3reader/`: `fetch.py` downloads, `parse.py` reads the AO3
 page, `clean.py` and `script.py` decide what gets said, `tts.py` is the voice,
 `audiobook.py` caches chapters and packages the file, and `web.py` with
 `static/index.html` is the web page.
+
+The phone reader is the single file `phone/index.html`. Its tests drive it in
+a browser with a stand-in voice; they run when Playwright and Chromium are
+installed (`uv pip install playwright`) and are skipped otherwise.

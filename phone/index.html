@@ -1,0 +1,1270 @@
+<title>Fic Listener</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&display=swap">
+<style>
+  /* Layout: one phone-width column — a shelf of stories, then the story's text with a player docked at the bottom */
+  :root {
+    --paper: #f2f4f1;
+    --surface: #ffffff;
+    --ink: #1a2226;
+    --muted: #5b676c;
+    --rule: #d9dfdd;
+    --accent: #1d5d70;
+    --accent-ink: #ffffff;
+    --accent-wash: #dcebef;
+    --aside: #6a5523;
+    --aside-wash: #f3ecd9;
+    --danger: #a33a2c;
+    --read: "Literata", Georgia, "Times New Roman", serif;
+    --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #11171a; --surface: #182024; --ink: #e5ebe9; --muted: #98a5aa; --rule: #2a3438;
+      --accent: #7dc3d7; --accent-ink: #0b1a1f; --accent-wash: #1b3139;
+      --aside: #dcc78d; --aside-wash: #29251a; --danger: #ff8e7f;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #11171a; --surface: #182024; --ink: #e5ebe9; --muted: #98a5aa; --rule: #2a3438;
+    --accent: #7dc3d7; --accent-ink: #0b1a1f; --accent-wash: #1b3139;
+    --aside: #dcc78d; --aside-wash: #29251a; --danger: #ff8e7f;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font: 16px/1.5 var(--ui);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  button, select, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:focus-visible, select:focus-visible, .open-button:focus-within, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+
+  .top {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 2;
+    display: flex; align-items: center; gap: 8px;
+    padding-block: 10px; background: var(--paper);
+    border-bottom: 1px solid var(--rule);
+  }
+  .top h1 {
+    flex: 1; min-width: 0; margin: 0;
+    font: 600 1.05rem/1.3 var(--read); text-wrap: balance;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .back {
+    border: 0; background: none; color: var(--accent); padding: 8px 4px; min-height: 44px; font-weight: 600;
+  }
+
+  /* Shelf */
+  .open-card {
+    margin-block: 20px 8px; padding: 16px; border-radius: 14px;
+    background: var(--surface); border: 1px solid var(--rule);
+  }
+  .open-button {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    min-height: 52px; border-radius: 12px; padding: 0 18px;
+    background: var(--accent); color: var(--accent-ink); font-weight: 600; font-size: 1.05rem;
+  }
+  .open-button svg { width: 22px; height: 22px; fill: currentColor; }
+  .hint { color: var(--muted); font-size: 0.92rem; margin: 10px 0 0; }
+  .error { color: var(--danger); margin: 10px 0 0; }
+  .shelf-head { font: 600 0.78rem/1 var(--ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 26px 0 8px; }
+  .shelf { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  .book {
+    display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center;
+    padding: 14px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--rule);
+  }
+  .book-main { min-width: 0; border: 0; background: none; text-align: left; padding: 0; }
+  .book-title { display: block; font: 600 1.05rem/1.3 var(--read); overflow-wrap: anywhere; }
+  .book-by { display: block; color: var(--muted); font-size: 0.92rem; }
+  .book-progress { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+  .meter { flex: 1; height: 4px; border-radius: 2px; background: var(--rule); overflow: hidden; }
+  .meter span { display: block; height: 100%; background: var(--accent); }
+  .remove { border: 0; background: none; color: var(--muted); font-size: 0.85rem; padding: 8px 0 8px 8px; min-height: 36px; }
+  .remove.confirm { color: var(--danger); font-weight: 600; }
+  .empty { padding: 4px 0; color: var(--muted); }
+  .quiet {
+    min-height: 44px; padding: 0 16px; border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--rule); color: var(--ink);
+  }
+  .tips { margin: 22px 0 8px; color: var(--muted); font-size: 0.92rem; }
+  .tips summary { cursor: pointer; color: var(--ink); font-weight: 600; padding: 6px 0; }
+  .tips p { margin: 8px 0 0; }
+  .sync { color: var(--muted); font-size: 0.85rem; margin: 18px 0 0; }
+
+  /* Reader */
+  .reader { padding-bottom: calc(190px + env(safe-area-inset-bottom, 0px)); }
+  .chapter-pick { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+  .chapter-pick select { flex: 1; min-width: 0; }
+  select {
+    min-height: 44px; padding: 0 10px; border-radius: 10px;
+    border: 1px solid var(--rule); background: var(--surface);
+  }
+  .text { font: 1.1rem/1.7 var(--read); margin-top: 8px; }
+  .text p, .text .story-title, .text h3 { margin: 0; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+  .text p + p { margin-top: 2px; }
+  .text .story-title { font: 600 1.6rem/1.25 var(--read); text-wrap: balance; margin-top: 18px; padding-bottom: 0; }
+  .text .byline { color: var(--muted); font-style: italic; }
+  .text h3 { font: 600 1.25rem/1.35 var(--read); text-wrap: balance; margin-top: 22px; margin-bottom: 6px; }
+  .text .current { background: var(--accent-wash); box-shadow: inset 3px 0 0 var(--accent); }
+  .scene { text-align: center; color: var(--muted); letter-spacing: 0.6em; padding-block: 10px; }
+  .aside {
+    margin-block: 12px; padding: 8px 6px 8px; border-radius: 12px; background: var(--aside-wash);
+    font-size: 0.98rem;
+  }
+  .aside-label {
+    display: block; padding: 2px 8px 4px; color: var(--aside);
+    font: 600 0.75rem/1.2 var(--ui); letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .chapter-end { display: flex; justify-content: center; margin-top: 28px; }
+
+  /* Player */
+  .player {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 3;
+    background: var(--surface); border-top: 1px solid var(--rule);
+    padding-top: 10px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .where { display: flex; justify-content: space-between; gap: 12px; font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .where span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .controls { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+  .icon {
+    width: 48px; height: 48px; border-radius: 50%; border: 0; background: none; color: var(--ink);
+    display: grid; place-items: center;
+  }
+  .icon svg { width: 26px; height: 26px; fill: currentColor; }
+  .icon:disabled { opacity: 0.35; cursor: default; }
+  .play { width: 64px; height: 64px; background: var(--accent); color: var(--accent-ink); }
+  .play svg { width: 30px; height: 30px; }
+  .settings { margin-top: 4px; }
+  .settings summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 6px 0; list-style-position: inside; }
+  .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; padding: 8px 0 4px; max-height: 50vh; overflow-y: auto; }
+  .settings-grid label { display: grid; gap: 4px; font-size: 0.85rem; color: var(--muted); min-width: 0; }
+  .settings-grid select { width: 100%; color: var(--ink); }
+  .settings-grid .wide { grid-column: 1 / -1; }
+  .check { display: flex !important; align-items: center; gap: 10px; color: var(--ink) !important; font-size: 0.95rem !important; min-height: 36px; }
+  .check input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+  .check small { display: block; color: var(--muted); font-size: 0.8rem; }
+  .notice { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; }
+
+  @media (max-width: 360px) { .settings-grid { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: no-preference) { .meter span { transition: width 0.4s ease; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <button id="back" class="back" type="button" hidden>‹ Stories</button>
+    <h1 id="heading">Fic Listener</h1>
+  </header>
+
+  <main>
+    <section id="shelf-view">
+      <div class="open-card">
+        <label class="open-button" for="epub">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h9l5 5v13H5V3zm8 1.5V9h4.5L13 4.5zM8 13v2h8v-2H8zm0 4v2h5v-2H8z"/></svg>
+          Open an EPUB
+        </label>
+        <input id="epub" class="visually-hidden" type="file" accept=".epub,application/epub+zip">
+        <p class="hint">On AO3, open the work, tap <strong>Download</strong>, then <strong>EPUB</strong>, and save it to Files. Then open it here. It stays on this phone.</p>
+        <p id="open-error" class="error" role="alert" hidden></p>
+      </div>
+
+      <h2 class="shelf-head">Your stories</h2>
+      <ul id="shelf" class="shelf"></ul>
+      <div id="empty" class="empty" hidden>
+        <p>Stories you open will show up here, with your place saved.</p>
+        <button id="sample" class="quiet" type="button">Try a short sample story</button>
+      </div>
+
+      <details class="tips">
+        <summary>Getting a more natural voice</summary>
+        <p>Your iPhone has better voices you can download for free. Go to Settings, Accessibility, Spoken Content (called Read &amp; Speak on newer iPhones), Voices, English, and download one marked <em>Enhanced</em> or <em>Premium</em>. Then pick it under “Voice and settings” while a story is open.</p>
+        <p>Your iPhone stops a web page from talking when the screen locks, so this reader keeps the screen on while it reads.</p>
+      </details>
+      <p id="sync-note" class="sync">Your place is saved on this phone.</p>
+    </section>
+
+    <section id="reader-view" class="reader" hidden>
+      <div class="chapter-pick" id="chapter-pick">
+        <label for="chapter" class="visually-hidden">Chapter</label>
+        <select id="chapter"></select>
+      </div>
+      <article id="text" class="text" aria-live="off"></article>
+      <div class="chapter-end"><button id="next-inline" class="quiet" type="button">Next chapter ›</button></div>
+    </section>
+  </main>
+</div>
+
+<div id="player" class="player" hidden>
+  <div class="wrap">
+    <div class="where"><span id="where"></span><span id="saved"></span></div>
+    <div class="controls">
+      <button id="prev-chapter" class="icon" type="button" aria-label="Previous chapter">
+        <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+      </button>
+      <button id="back-line" class="icon" type="button" aria-label="Back one paragraph">
+        <svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg>
+      </button>
+      <button id="play" class="icon play" type="button" aria-label="Read aloud">
+        <svg viewBox="0 0 24 24"><path id="play-shape" d="M8 5v14l11-7z"/></svg>
+      </button>
+      <button id="next-line" class="icon" type="button" aria-label="Forward one paragraph">
+        <svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z"/></svg>
+      </button>
+      <button id="next-chapter" class="icon" type="button" aria-label="Next chapter">
+        <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+      </button>
+    </div>
+    <details class="settings" id="settings">
+      <summary>Voice and settings</summary>
+      <div class="settings-grid">
+        <label class="wide">Voice<select id="voice"></select></label>
+        <label>Speed
+          <select id="rate">
+            <option value="0.8">Slow</option>
+            <option value="0.9">A bit slower</option>
+            <option value="1">Normal</option>
+            <option value="1.1">A bit faster</option>
+            <option value="1.25">Fast</option>
+            <option value="1.5">Very fast</option>
+          </select>
+        </label>
+        <label>Sleep timer
+          <select id="sleep">
+            <option value="off">Off</option>
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="chapter">End of chapter</option>
+          </select>
+        </label>
+        <label class="check wide"><input id="opt-summary" type="checkbox" checked> Read summaries</label>
+        <label class="check wide"><input id="opt-notes" type="checkbox"> Read author's notes</label>
+        <label class="check wide"><input id="opt-follow" type="checkbox" checked> Scroll along with the reading</label>
+        <label class="check wide"><input id="opt-awake" type="checkbox" checked> Keep the screen on while reading</label>
+        <label class="check wide"><input id="opt-locked" type="checkbox">
+          <span>Try to keep reading with the screen locked<small>An experiment. It may not work on your phone.</small></span>
+        </label>
+      </div>
+      <p id="voice-tip" class="notice" hidden>For a more natural voice, download an Enhanced or Premium voice in your iPhone's settings (see the tip on the stories page).</p>
+    </details>
+  </div>
+</div>
+
+<noscript><p class="error">Fic Listener needs JavaScript turned on.</p></noscript>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+"use strict";
+
+// ---------- Small helpers ----------
+
+const $ = (selector) => document.querySelector(selector);
+const words = (text) => (text.match(/\S+/g) || []).length;
+const local = {
+  get(key, fallback) {
+    try { const value = localStorage.getItem(key); return value === null ? fallback : JSON.parse(value); }
+    catch { return fallback; }
+  },
+  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage blocked */ } },
+  remove(key) { try { localStorage.removeItem(key); } catch { /* storage blocked */ } },
+};
+
+// ---------- Cleaning text so it sounds right (the same rules as the computer version) ----------
+
+const INVISIBLE = /[­​‌‍⁠﻿]/g;
+const ODD_SPACES = /[  -   　]/g;
+const URLS = /(?:https?:\/\/|www\.)\S+/gi;
+const SYMBOLS = /[←-⇿⌀-⏿■-➿⬀-⯿⃣︎️]|[\u{1f000}-\u{1faff}]|[\u{e0020}-\u{e007f}]/gu;
+const HEARTS = /<3+/g;
+const EMPHASIS = /(?<![\p{L}\p{N}_])([*_~]+)(?=\S)(.+?)(?<=\S)\1(?![\p{L}\p{N}_])/gu;
+const STRAY = /[*_~#^|<>\[\]{}\\]/g;
+const TITLES = { Mr: "Mister", Mrs: "Missus", Ms: "Miz", Mx: "Mix", Dr: "Doctor", Prof: "Professor" };
+const TITLE_ABBREVIATIONS = /\b(Mrs|Mr|Ms|Mx|Dr|Prof)\.(?=\s)/g;
+const WORDS = /[\p{L}\p{M}]+/gu;
+const ROMAN = /^[IVXLCDM]+$/;
+const STRETCHED = /(\p{L})\1{2,}/gu;
+const HOME_ROW = new Set("asdfghjkl");
+
+function speakable(text) {
+  text = text.normalize("NFC").replace(INVISIBLE, "").replace(ODD_SPACES, " ");
+  text = text.replace(URLS, "link").replace(HEARTS, "").replace(SYMBOLS, "");
+  text = text.replace(EMPHASIS, "$2").replace(STRAY, " ");
+  text = text.replace(TITLE_ABBREVIATIONS, (_, title) => TITLES[title]);
+  text = text.replace(WORDS, fixWord);
+  text = text.replace(/[!?]{2,}/g, (run) => (run.includes("?") ? "?" : "!"));
+  text = text.replace(/\.(?:\s?\.){2,}|…+/g, "…");
+  text = text.replace(/--+|—+/g, "—");
+  text = text.split(/\s+/).filter(Boolean).join(" ");
+  text = text.replace(/\s+([,.!?;:])/g, "$1");
+  return /[\p{L}\p{N}]/u.test(text) ? text : "";
+}
+
+function fixWord(word) {
+  if (ROMAN.test(word)) return word;
+  if (isKeysmash(word)) return "";
+  // "Nooo" -> "No", "Pleeease" -> "Please"; "Hmmm" and "Ahhh" keep two letters
+  return word.replace(STRETCHED, (_, letter) => letter.repeat("hmz".includes(letter.toLowerCase()) ? 2 : 1));
+}
+
+function isKeysmash(word) {
+  const lower = word.toLowerCase();
+  if (lower.length < 7) return false;
+  const letters = [...lower];
+  const homeRow = letters.filter((ch) => HOME_ROW.has(ch)).length / letters.length;
+  const vowels = letters.filter((ch) => "aeiouy".includes(ch)).length / letters.length;
+  return homeRow >= 0.85 && vowels <= 0.25;
+}
+
+function isSceneBreak(line) {
+  const compact = line.replace(/\s+/g, "");
+  if (!compact) return false;
+  const letters = [...compact].filter((ch) => /[\p{L}\p{N}]/u.test(ch)).join("");
+  if (!letters) return true;
+  if ([...compact].length > 20 || ![...letters].every((ch) => "oOxX0".includes(ch))) return false;
+  // "Ooo" on its own could be a word; "oOo", "xXx" and "-x-" are dividers
+  const capitalized = letters[0].toUpperCase() + letters.slice(1).toLowerCase();
+  return letters !== compact || (letters.length >= 3 && letters !== capitalized);
+}
+
+// ---------- Reading an EPUB ----------
+
+const SKIP_TAGS = new Set(["script", "style", "img", "svg", "audio", "video", "rt", "rp", "button", "input",
+  "select", "textarea", "form", "object", "embed", "iframe", "noscript", "head", "title", "nav"]);
+const BLOCK_TAGS = new Set(["address", "article", "aside", "blockquote", "caption", "center", "dd", "details",
+  "div", "dl", "dt", "figcaption", "figure", "footer", "header", "li", "main", "ol", "p", "pre", "section",
+  "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul"]);
+const HEADING_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
+// AO3 puts a plain label before each summary or notes box
+const LABELS = {
+  "summary": "summary", "chapter summary": "summary",
+  "notes": "note", "chapter notes": "note", "author's note": "note", "author's notes": "note",
+  "end notes": "endnote", "chapter end notes": "endnote",
+};
+const BOILERPLATE = [
+  /^Posted originally on the Archive of Our Own at /i,
+  /^Please drop by the Archive and comment/i,
+  /^\(?See the end of the (chapter|work) for (more )?notes\.?\)?$/i,
+  /^Afterword$/i,
+];
+const FOOTNOTE_MARK = /^\[?(\d{1,3}|[*†‡§]+)\]?$/;
+const tidy = (text) => text.replace(/\s+/g, " ").trim();
+
+async function readEpub(file) {
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(file);
+  } catch {
+    throw new Error("That file isn't an EPUB this can read. On AO3, use Download, then EPUB.");
+  }
+  const read = async (path) => {
+    const entry = zip.file(path) || zip.file(decodeURIComponent(path));
+    if (!entry) throw new Error(`The EPUB is missing ${path}.`);
+    return entry.async("string");
+  };
+  const xml = (text) => new DOMParser().parseFromString(text, "application/xml");
+
+  const container = xml(await read("META-INF/container.xml"));
+  const opfPath = container.querySelector("rootfile")?.getAttribute("full-path");
+  if (!opfPath) throw new Error("That EPUB doesn't say where its contents are.");
+  const opf = xml(await read(opfPath));
+  const base = opfPath.includes("/") ? opfPath.slice(0, opfPath.lastIndexOf("/") + 1) : "";
+  const meta = (name) => [...opf.getElementsByTagNameNS("*", name)].map((el) => tidy(el.textContent)).filter(Boolean);
+
+  const manifest = new Map();
+  for (const item of opf.getElementsByTagNameNS("*", "item")) {
+    manifest.set(item.getAttribute("id"), { href: item.getAttribute("href"), type: item.getAttribute("media-type") || "" });
+  }
+  const docs = [];
+  for (const ref of opf.getElementsByTagNameNS("*", "itemref")) {
+    const item = manifest.get(ref.getAttribute("idref"));
+    if (!item || !/html/.test(item.type)) continue;
+    const source = await read(resolvePath(base, item.href));
+    let doc = new DOMParser().parseFromString(source, "application/xhtml+xml");
+    if (doc.getElementsByTagName("parsererror").length || !doc.body) {
+      doc = new DOMParser().parseFromString(source, "text/html");
+    }
+    docs.push(doc);
+  }
+  if (!docs.length) throw new Error("That EPUB has no story text in it.");
+
+  const title = meta("title")[0] || file.name.replace(/\.epub$/i, "");
+  const authors = meta("creator");
+  const ids = [...meta("identifier"), ...meta("source")].join(" ");
+  const blocks = [];
+  const found = { ao3: null };
+  docs.forEach((doc, index) => blocks.push(...blocksOf(doc.body || doc.documentElement, index, found)));
+  const story = arrange(blocks, {
+    title, authors, description: meta("description")[0] || "", docCount: docs.length, fromAo3: Boolean(found.ao3),
+  });
+  const workId = (ids.match(/archiveofourown\.org\/works\/(\d+)/) || found.ao3 || [])[1];
+  return {
+    id: workId ? `ao3-${workId}` : `book-${hash(`${title}|${authors.join(",")}|${story.chapters.length}`)}`,
+    title,
+    author: joinNames(authors) || "Anonymous",
+    lang: meta("language")[0] || "en",
+    chapters: story.chapters,
+    added: Date.now(),
+  };
+}
+
+function resolvePath(base, href) {
+  const parts = (base + href.split("#")[0]).split("/");
+  const out = [];
+  for (const part of parts) {
+    if (part === "..") out.pop();
+    else if (part !== ".") out.push(part);
+  }
+  return out.join("/");
+}
+
+function joinNames(names) {
+  if (names.length < 2) return names[0] || "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+function hash(text) {
+  let h = 0x811c9dc5;
+  for (const ch of text) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16);
+}
+
+// One document's text as blocks: {k: kind, x: [lines], d: document}.
+// Notes in `found.ao3` when the text carries AO3's "Posted originally" line.
+function blocksOf(root, docIndex, found = {}) {
+  const out = [];
+  const marked = new Map();
+  let lines = [], line = [], kind = null;
+
+  const endLine = () => {
+    const text = tidy(line.join(""));
+    line = [];
+    if (text) lines.push(text);
+  };
+  const endBlock = () => {
+    endLine();
+    if (!lines.length) return;
+    // AO3's title page puts the title and "Posted originally on..." in one paragraph
+    if (lines.some((text) => BOILERPLATE.some((pattern) => pattern.test(text)))) {
+      const work = lines.join(" ").match(/archiveofourown\.org\/works\/(\d+)/);
+      if (work) found.ao3 = work;
+      else found.ao3 = found.ao3 || ["", ""];
+    } else {
+      out.push({ k: kind || "p", x: lines, d: docIndex });
+    }
+    lines = [];
+  };
+
+  const walk = (node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) { line.push(child.nodeValue); continue; }
+      if (child.nodeType !== 1) continue;
+      const tag = child.localName.toLowerCase();
+      if (SKIP_TAGS.has(tag)) continue;
+      if (tag === "dl" && /\b(Rating|Fandom|Archive Warnings?):/i.test(child.textContent)) continue;
+      if (tag === "br") { endLine(); continue; }
+      if (tag === "hr") { endBlock(); out.push({ k: "break", x: [], d: docIndex }); continue; }
+      if (tag === "sup" && FOOTNOTE_MARK.test(child.textContent.trim())) continue;
+      if (HEADING_TAGS.has(tag)) {
+        endBlock();
+        const text = tidy(child.textContent);
+        if (text) out.push({ k: "h", x: [text], d: docIndex });
+        continue;
+      }
+      if (BLOCK_TAGS.has(tag) || marked.has(child)) {
+        const label = LABELS[tidy(child.textContent).replace(/:$/, "").toLowerCase()];
+        const next = child.nextElementSibling;
+        if (label && tag !== "blockquote" && next && next.localName.toLowerCase() === "blockquote") {
+          marked.set(next, label);
+          continue;
+        }
+        endBlock();
+        const outer = kind;
+        if (marked.has(child)) kind = marked.get(child);
+        walk(child);
+        endBlock();
+        kind = outer;
+        continue;
+      }
+      walk(child);
+    }
+  };
+  walk(root);
+  endBlock();
+  return out;
+}
+
+// Group blocks into chapters, dropping AO3's title page details
+function arrange(blocks, { title, authors, description, docCount, fromAo3 = false }) {
+  const sameText = (a, b) => tidy(a).toLowerCase() === tidy(b).toLowerCase();
+  const isByline = (b) => b.k === "p" && /^by\s/i.test(b.x[0]) && b.x[0].length < 300 &&
+    authors.some((name) => b.x[0].toLowerCase().includes(name.toLowerCase()));
+  const kept = blocks.filter((b) => !(b.k === "h" && sameText(b.x[0], title)) && !isByline(b));
+  const isChapterHeading = (b) => b.k === "h" && /^chapter\s+\d+/i.test(b.x[0]);
+  fromAo3 = fromAo3 || blocks.some((b) => b.k in ASIDE_LABELS);
+
+  const intro = [];
+  let chapters = [];
+  if (kept.some(isChapterHeading)) {
+    let current = null;
+    for (const b of kept) {
+      if (isChapterHeading(b)) {
+        current = { title: b.x[0], blocks: [b] };
+        chapters.push(current);
+      } else if (current) {
+        current.blocks.push(b);
+      } else if (b.k === "summary" || b.k === "note") {
+        intro.push(b);
+      }
+    }
+  } else if (!fromAo3 && docCount > 1) {
+    // Some other book: one chapter per file
+    const byDoc = new Map();
+    for (const b of kept) {
+      if (!byDoc.has(b.d)) byDoc.set(b.d, []);
+      byDoc.get(b.d).push(b);
+    }
+    chapters = [...byDoc.values()].map((list, i) => ({
+      title: list.find((b) => b.k === "h")?.x[0] || `Part ${i + 1}`,
+      blocks: list,
+    }));
+  } else {
+    const body = [];
+    for (const b of kept) (b.k === "summary" || b.k === "note") && !body.length ? intro.push(b) : body.push(b);
+    chapters = [{ title, blocks: body }];
+  }
+  chapters = chapters.filter((c) => c.blocks.some((b) => b.k !== "h" && b.k !== "break"));
+  if (!chapters.length) throw new Error("Couldn't find the story text in that EPUB.");
+
+  if (!intro.some((b) => b.k === "summary") && description) {
+    const summary = tidy(new DOMParser().parseFromString(description, "text/html").body.textContent || "");
+    if (summary) intro.unshift({ k: "summary", x: [summary] });
+  }
+  const opening = [{ k: "title", x: [title] }];
+  if (authors.length) opening.push({ k: "by", x: [`By ${joinNames(authors)}`] });
+  chapters[0].blocks.unshift(...opening, ...intro);
+  for (const chapter of chapters) {
+    for (const b of chapter.blocks) delete b.d;
+    chapter.words = chapter.blocks.reduce((sum, b) => sum + b.x.reduce((n, l) => n + words(l), 0), 0);
+  }
+  return { chapters };
+}
+
+// ---------- What gets said ----------
+
+const PAUSE = { line: 150, paragraph: 350, heading: 700, label: 250, scene: 1300 };
+const ASIDE_LABELS = { summary: "Summary", note: "Author's note", endnote: "End note" };
+
+function readingQueue(chapter, settings) {
+  const queue = [];
+  let previous = null;
+  const lengthen = (ms) => { if (queue.length) queue[queue.length - 1].pause = Math.max(queue[queue.length - 1].pause, ms); };
+  chapter.blocks.forEach((block, index) => {
+    const skip = (block.k === "summary" && !settings.summary) ||
+      ((block.k === "note" || block.k === "endnote") && !settings.notes);
+    if (block.k === "break") lengthen(PAUSE.scene);
+    else if (!skip) {
+      if (ASIDE_LABELS[block.k] && previous !== block.k) {
+        queue.push({ b: index, text: `${ASIDE_LABELS[block.k]}.`, pause: PAUSE.label });
+      }
+      block.x.forEach((line, i) => {
+        if (isSceneBreak(line)) return lengthen(PAUSE.scene);
+        let text = speakable(line);
+        if (!text) return;
+        if (block.k === "h") text = text.replace(/^(Chapter \d+)\s*:\s*/i, "$1. ");
+        if (!/[.!?…—"”’']$/.test(text)) text = text.replace(/[,;:]+$/, "") + ".";
+        const last = i === block.x.length - 1;
+        const pause = !last ? PAUSE.line : ["h", "title", "by"].includes(block.k) ? PAUSE.heading : PAUSE.paragraph;
+        const parts = pieces(text);
+        parts.forEach((piece, n) => queue.push({ b: index, text: piece, pause: n === parts.length - 1 ? pause : 0 }));
+      });
+    }
+    previous = block.k;
+  });
+  return queue;
+}
+
+// Long paragraphs go to the voice a few sentences at a time; some voices stall on very long text
+function pieces(text, limit = 280) {
+  if (text.length <= limit) return [text];
+  const sentences = text.split(/(?<=[.!?…]["”’']?)\s+/);
+  const out = [];
+  let current = "";
+  for (const sentence of sentences) {
+    if (current && (current + " " + sentence).length > limit) { out.push(current); current = sentence; }
+    else current = current ? `${current} ${sentence}` : sentence;
+  }
+  if (current) out.push(current);
+  return out;
+}
+
+// ---------- Saved stories (on this phone) ----------
+
+const shelfStore = {
+  db: null,
+  async open() {
+    if (this.db) return this.db;
+    this.db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("fic-listener", 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("books", { keyPath: "id" });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return this.db;
+  },
+  async run(mode, action) {
+    try {
+      const db = await this.open();
+      return await new Promise((resolve, reject) => {
+        const store = db.transaction("books", mode).objectStore("books");
+        const request = action(store);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } catch {
+      return mode === "readonly" ? [] : null;
+    }
+  },
+  all() { return this.run("readonly", (store) => store.getAll()); },
+  put(book) { return this.run("readwrite", (store) => store.put(book)); },
+  remove(id) { return this.run("readwrite", (store) => store.delete(id)); },
+};
+
+// ---------- Your place: on this phone, and in your Claude account when available ----------
+
+const place = {
+  cloud: null,     // {db, uid}
+  writing: Promise.resolve(),
+  lastCloudWrite: 0,
+  get(id) { return local.get(`place:${id}`, null); },
+  set(book, position, { flush = false } = {}) {
+    const record = { c: position.c, b: position.b, t: Date.now() };
+    local.set(`place:${book.id}`, record);
+    showSaved("Place saved");
+    if (this.cloud && (flush || Date.now() - this.lastCloudWrite > 15000)) this.push(book, record);
+  },
+  push(book, record) {
+    this.lastCloudWrite = Date.now();
+    const { db, uid } = this.cloud;
+    this.writing = this.writing
+      .then(() => db.collection(`data/users/${uid}`).doc(book.id).set({ ...record, title: book.title }))
+      .catch((error) => { if (error?.code === "invalid_argument" || error?.code === "revoked") this.cloud = null; });
+  },
+  forget(id) {
+    local.remove(`place:${id}`);
+    if (!this.cloud) return;
+    const { db, uid } = this.cloud;
+    this.writing = this.writing.then(() => db.collection(`data/users/${uid}`).doc(id).delete()).catch(() => {});
+  },
+  async connect() {
+    if (!window.claude?.use) return;
+    try {
+      const [db, user] = await Promise.all([window.claude.use("db"), window.claude.use("user")]);
+      const uid = user ? await user.id() : null;
+      if (!db || !uid) return;
+      this.cloud = { db, uid };
+      $("#sync-note").textContent = "Your place is saved on this phone and in your Claude account.";
+      const snapshot = await db.collection(`data/users/${uid}`).get();
+      let changed = false;
+      for (const doc of snapshot.docs) {
+        const remote = doc.data();
+        const mine = this.get(doc.id);
+        if (remote && Number.isFinite(remote.c) && (!mine || remote.t > mine.t)) {
+          local.set(`place:${doc.id}`, { c: remote.c, b: remote.b, t: remote.t });
+          changed = true;
+        }
+      }
+      if (changed) placesArrived();
+    } catch {
+      this.cloud = null;
+    }
+  },
+};
+
+// ---------- The voice ----------
+
+const synth = window.speechSynthesis;
+let voices = [];
+
+function voiceRank(voice) {
+  const id = `${voice.voiceURI} ${voice.name}`.toLowerCase();
+  if (id.includes("premium")) return 0;
+  if (id.includes("enhanced")) return 1;
+  if (id.includes("siri") || id.includes("natural") || id.includes("neural")) return 2;
+  if (id.includes("eloquence") || id.includes("speech.synthesis.voice")) return 9;
+  return 5;
+}
+
+function loadVoices() {
+  if (!synth) return;
+  const lang = (state.book?.lang || "en").slice(0, 2).toLowerCase();
+  const all = synth.getVoices();
+  const matching = all.filter((v) => v.lang.toLowerCase().startsWith(lang));
+  const pool = matching.length ? matching : all;
+  voices = pool
+    .filter((v) => voiceRank(v) < 9 || pool.every((other) => voiceRank(other) === 9))
+    .sort((a, b) => voiceRank(a) - voiceRank(b) || a.name.localeCompare(b.name));
+  const select = $("#voice");
+  const chosen = settings.voice;
+  select.replaceChildren(new Option("Phone's default voice", ""));
+  for (const voice of voices) {
+    const quality = voiceRank(voice) === 0 ? " · Premium" : voiceRank(voice) === 1 ? " · Enhanced" : "";
+    select.add(new Option(`${voice.name.replace(/\s*\((Premium|Enhanced)\)/i, "")} (${voice.lang})${quality}`, voice.voiceURI));
+  }
+  const best = voices.find((v) => voiceRank(v) <= 1);
+  select.value = voices.some((v) => v.voiceURI === chosen) ? chosen : best ? best.voiceURI : "";
+  $("#voice-tip").hidden = Boolean(best);
+}
+
+function currentVoice() {
+  return voices.find((v) => v.voiceURI === $("#voice").value) || null;
+}
+
+// ---------- Settings ----------
+
+const settings = Object.assign(
+  { voice: "", rate: "1", summary: true, notes: false, follow: true, awake: true, locked: false },
+  local.get("settings", {}),
+);
+const settingInputs = {
+  voice: "#voice", rate: "#rate", summary: "#opt-summary", notes: "#opt-notes",
+  follow: "#opt-follow", awake: "#opt-awake", locked: "#opt-locked",
+};
+for (const [key, selector] of Object.entries(settingInputs)) {
+  const input = $(selector);
+  if (input.type === "checkbox") input.checked = Boolean(settings[key]);
+  else if (key !== "voice") input.value = settings[key];
+  input.addEventListener("change", () => {
+    settings[key] = input.type === "checkbox" ? input.checked : input.value;
+    local.set("settings", settings);
+    if (key === "summary" || key === "notes") { renderChapter(); if (state.playing) restartAt(state.position); }
+    if ((key === "voice" || key === "rate") && state.playing) restartAt(state.position);
+    if (key === "awake") state.playing && settings.awake ? holdScreen() : releaseScreen();
+    if (key === "locked") state.playing && settings.locked ? keepAlive.start() : keepAlive.stop();
+  });
+}
+
+// ---------- State and the reading loop ----------
+
+const state = {
+  books: [],
+  book: null,
+  position: { c: 0, b: 0 },
+  playing: false,
+  queue: [],
+  index: 0,
+  token: 0,
+  gap: null,
+  startedAt: 0,
+  sleepAt: null,
+  userScrolledAt: 0,
+};
+
+function play() {
+  if (!synth) return showReaderNotice("This browser can't read aloud.");
+  if (!state.book) return;
+  state.playing = true;
+  setPlayButton();
+  if (settings.awake) holdScreen();
+  if (settings.locked) keepAlive.start();
+  const minutes = Number($("#sleep").value);
+  state.sleepAt = minutes ? Date.now() + minutes * 60000 : null;
+  updateMediaSession();
+  restartAt(state.position);
+}
+
+function pause({ save = true } = {}) {
+  state.playing = false;
+  state.token++;
+  clearTimeout(state.gap);
+  state.gap = null;
+  if (synth) synth.cancel();
+  releaseScreen();
+  keepAlive.stop();
+  setPlayButton();
+  if (save && state.book) place.set(state.book, state.position, { flush: true });
+}
+
+function restartAt(position) {
+  state.token++;
+  clearTimeout(state.gap);
+  if (synth && (synth.speaking || synth.pending)) synth.cancel();
+  state.queue = readingQueue(state.book.chapters[position.c], settings);
+  state.index = state.queue.findIndex((item) => item.b >= position.b);
+  if (state.index < 0) state.index = state.queue.length;
+  // Safari drops a new utterance spoken in the same moment as cancel()
+  state.gap = setTimeout(speakNext, 120);
+}
+
+function speakNext() {
+  state.gap = null;
+  if (!state.playing) return;
+  if (state.index >= state.queue.length) return chapterFinished();
+  const item = state.queue[state.index];
+  const token = ++state.token;
+  moveTo({ c: state.position.c, b: item.b });
+
+  const utterance = new SpeechSynthesisUtterance(item.text);
+  const voice = currentVoice();
+  if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
+  else utterance.lang = state.book.lang || "en";
+  utterance.rate = Number(settings.rate) || 1;
+  let finished = false;
+  const done = () => {
+    if (finished || token !== state.token) return;
+    finished = true;
+    state.index++;
+    state.gap = setTimeout(speakNext, document.hidden ? 0 : item.pause);
+  };
+  utterance.onend = done;
+  utterance.onerror = (event) => {
+    if (event.error === "interrupted" || event.error === "canceled") return;
+    done();
+  };
+  state.startedAt = Date.now();
+  synth.speak(utterance);
+}
+
+function chapterFinished() {
+  if ($("#sleep").value === "chapter") {
+    $("#sleep").value = "off";
+    pause();
+    return showReaderNotice("Stopped at the end of the chapter, as the sleep timer asked.");
+  }
+  const next = state.position.c + 1;
+  if (next >= state.book.chapters.length) {
+    pause({ save: false });
+    place.set(state.book, { c: state.position.c, b: state.book.chapters[state.position.c].blocks.length }, { flush: true });
+    return showReaderNotice("That's the end of the story.");
+  }
+  openChapter(next, 0);
+  restartAt(state.position);
+}
+
+// Watch for speech that silently stopped, the sleep timer, and slow voices
+setInterval(() => {
+  if (!state.playing || !synth) return;
+  if (state.sleepAt && Date.now() >= state.sleepAt) {
+    $("#sleep").value = "off";
+    pause();
+    return showReaderNotice("Stopped by the sleep timer.");
+  }
+  const idle = !synth.speaking && !synth.pending && state.gap === null;
+  if (idle && Date.now() - state.startedAt > 4000) speakNext();
+  // Chrome's online voices go quiet after about 15 seconds unless nudged
+  const voice = currentVoice();
+  if (synth.speaking && voice && !voice.localService && !/iPhone|iPad/.test(navigator.userAgent)) {
+    synth.pause();
+    synth.resume();
+  }
+}, 2000);
+
+// ---------- Screen and lock screen ----------
+
+let wakeLock = null;
+async function holdScreen() {
+  if (!settings.awake || !navigator.wakeLock || document.hidden) return;
+  try { wakeLock = await navigator.wakeLock.request("screen"); } catch { wakeLock = null; }
+}
+function releaseScreen() {
+  if (wakeLock) wakeLock.release().catch(() => {});
+  wakeLock = null;
+}
+
+// Plays near-silence so the phone may keep the page running with the screen locked
+const keepAlive = {
+  audio: null,
+  start() {
+    try {
+      if (!this.audio) {
+        this.audio = new Audio(silentWav());
+        this.audio.loop = true;
+        this.audio.volume = 0.01;
+      }
+      this.audio.play().catch(() => {});
+    } catch { /* not allowed here */ }
+  },
+  stop() { if (this.audio) this.audio.pause(); },
+};
+
+function silentWav(seconds = 2, rate = 8000) {
+  const samples = seconds * rate;
+  const buffer = new ArrayBuffer(44 + samples * 2);
+  const view = new DataView(buffer);
+  const text = (offset, value) => [...value].forEach((ch, i) => view.setUint8(offset + i, ch.charCodeAt(0)));
+  text(0, "RIFF"); view.setUint32(4, 36 + samples * 2, true); text(8, "WAVE");
+  text(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  text(36, "data"); view.setUint32(40, samples * 2, true);
+  return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+}
+
+function updateMediaSession() {
+  if (!("mediaSession" in navigator) || !state.book) return;
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: state.book.chapters[state.position.c].title,
+      artist: state.book.author,
+      album: state.book.title,
+    });
+    navigator.mediaSession.setActionHandler("play", play);
+    navigator.mediaSession.setActionHandler("pause", () => pause());
+    navigator.mediaSession.setActionHandler("previoustrack", () => stepChapter(-1));
+    navigator.mediaSession.setActionHandler("nexttrack", () => stepChapter(1));
+  } catch { /* not supported */ }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    if (state.book) place.set(state.book, state.position, { flush: true });
+  } else if (state.playing) {
+    holdScreen();
+  }
+});
+
+// ---------- Showing the shelf and the story ----------
+
+function progressOf(book, position) {
+  if (!position) return 0;
+  const total = book.chapters.reduce((sum, c) => sum + c.words, 0) || 1;
+  let done = book.chapters.slice(0, position.c).reduce((sum, c) => sum + c.words, 0);
+  const chapter = book.chapters[position.c];
+  if (chapter) {
+    done += chapter.blocks.slice(0, position.b).reduce((sum, b) => sum + b.x.reduce((n, l) => n + words(l), 0), 0);
+  }
+  return Math.min(1, done / total);
+}
+
+function renderShelf() {
+  const shelf = $("#shelf");
+  const books = [...state.books].sort((a, b) => (place.get(b.id)?.t || b.added) - (place.get(a.id)?.t || a.added));
+  shelf.replaceChildren(...books.map((book) => {
+    const saved = place.get(book.id);
+    const share = progressOf(book, saved);
+    const item = document.createElement("li");
+    item.className = "book";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "book-main";
+    open.dataset.open = book.id;
+    const title = Object.assign(document.createElement("span"), { className: "book-title", textContent: book.title });
+    const by = Object.assign(document.createElement("span"), { className: "book-by", textContent: `by ${book.author}` });
+    open.append(title, by);
+    const remove = Object.assign(document.createElement("button"), {
+      type: "button", className: "remove", textContent: "Remove",
+    });
+    remove.dataset.remove = book.id;
+    const progress = document.createElement("div");
+    progress.className = "book-progress";
+    const meter = document.createElement("div");
+    meter.className = "meter";
+    meter.append(Object.assign(document.createElement("span"), { style: `width:${Math.round(share * 100)}%` }));
+    const label = document.createElement("span");
+    label.textContent = saved
+      ? `Chapter ${Math.min(saved.c + 1, book.chapters.length)} of ${book.chapters.length} · ${Math.round(share * 100)}%`
+      : `${book.chapters.length} chapter${book.chapters.length === 1 ? "" : "s"} · not started`;
+    progress.append(meter, label);
+    item.append(open, remove, progress);
+    return item;
+  }));
+  $("#empty").hidden = books.length > 0;
+}
+
+function openBook(book) {
+  pause({ save: false });
+  state.book = book;
+  const saved = place.get(book.id);
+  const c = saved ? Math.min(saved.c, book.chapters.length - 1) : 0;
+  $("#chapter").replaceChildren(...book.chapters.map((chapter, i) => new Option(`${i + 1}. ${chapter.title}`, String(i))));
+  $("#chapter-pick").hidden = book.chapters.length < 2;
+  $("#heading").textContent = book.title;
+  $("#shelf-view").hidden = true;
+  $("#reader-view").hidden = false;
+  $("#player").hidden = false;
+  $("#back").hidden = false;
+  loadVoices();
+  openChapter(c, saved ? saved.b : 0);
+  scrollToCurrent(true);
+}
+
+function closeBook() {
+  pause();
+  state.book = null;
+  $("#heading").textContent = "Fic Listener";
+  $("#shelf-view").hidden = false;
+  $("#reader-view").hidden = true;
+  $("#player").hidden = true;
+  $("#back").hidden = true;
+  renderShelf();
+  window.scrollTo(0, 0);
+}
+
+function openChapter(c, b) {
+  state.position = { c, b };
+  $("#chapter").value = String(c);
+  renderChapter();
+  window.scrollTo(0, 0);
+  updateWhere();
+  updateMediaSession();
+  $("#prev-chapter").disabled = c === 0;
+  $("#next-chapter").disabled = c >= state.book.chapters.length - 1;
+  $("#next-inline").hidden = c >= state.book.chapters.length - 1;
+}
+
+function renderChapter() {
+  if (!state.book) return;
+  const chapter = state.book.chapters[state.position.c];
+  const article = $("#text");
+  const parts = [];
+  let aside = null;
+  chapter.blocks.forEach((block, index) => {
+    let el;
+    if (block.k === "break" || (block.k === "p" && block.x.length === 1 && isSceneBreak(block.x[0]))) {
+      el = Object.assign(document.createElement("div"), { className: "scene", textContent: "⁂" });
+      el.setAttribute("aria-hidden", "true");
+    } else if (block.k === "title") {
+      el = document.createElement("h2");
+      el.className = "story-title";
+    } else if (block.k === "h") {
+      el = document.createElement("h3");
+    } else {
+      el = document.createElement("p");
+      if (block.k === "by") el.className = "byline";
+    }
+    if (!el.classList.contains("scene")) {
+      block.x.forEach((line, i) => {
+        if (i) el.append(document.createElement("br"));
+        el.append(line);
+      });
+    }
+    el.dataset.b = String(index);
+
+    if (ASIDE_LABELS[block.k]) {
+      if (!aside || aside.dataset.kind !== block.k) {
+        aside = Object.assign(document.createElement("div"), { className: "aside" });
+        aside.dataset.kind = block.k;
+        const read = block.k === "summary" ? settings.summary : settings.notes;
+        aside.append(Object.assign(document.createElement("span"), {
+          className: "aside-label",
+          textContent: ASIDE_LABELS[block.k] + (read ? "" : " · not read aloud"),
+        }));
+        parts.push(aside);
+      }
+      aside.append(el);
+    } else {
+      aside = null;
+      parts.push(el);
+    }
+  });
+  article.replaceChildren(...parts);
+  highlight();
+}
+
+function moveTo(position) {
+  const chapterChanged = position.c !== state.position.c;
+  state.position = position;
+  if (chapterChanged) openChapter(position.c, position.b);
+  highlight();
+  updateWhere();
+  if (state.book) place.set(state.book, position);
+  if (settings.follow && Date.now() - state.userScrolledAt > 6000) scrollToCurrent();
+}
+
+function highlight() {
+  const article = $("#text");
+  article.querySelector(".current")?.classList.remove("current");
+  const blocks = state.book.chapters[state.position.c].blocks;
+  let b = Math.min(state.position.b, blocks.length - 1);
+  while (b > 0 && blocks[b].k === "break") b--;
+  article.querySelector(`[data-b="${b}"]`)?.classList.add("current");
+}
+
+function scrollToCurrent(instant = false) {
+  const el = $("#text .current");
+  if (!el) return;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({ block: "center", behavior: instant || reduce ? "auto" : "smooth" });
+}
+
+function updateWhere() {
+  if (!state.book) return;
+  const total = state.book.chapters.length;
+  const share = Math.round(progressOf(state.book, state.position) * 100);
+  $("#where").textContent = total > 1
+    ? `Chapter ${state.position.c + 1} of ${total} · ${share}%`
+    : `${share}% through`;
+}
+
+let savedTimer = null;
+function showSaved(text) {
+  const el = $("#saved");
+  el.textContent = `✓ ${text}`;
+  clearTimeout(savedTimer);
+  savedTimer = setTimeout(() => { el.textContent = ""; }, 2500);
+}
+
+function showReaderNotice(text) {
+  $("#where").textContent = text;
+  setTimeout(updateWhere, 6000);
+}
+
+function setPlayButton() {
+  $("#play").setAttribute("aria-label", state.playing ? "Pause" : "Read aloud");
+  $("#play-shape").setAttribute("d", state.playing ? "M7 5h4v14H7zm6 0h4v14h-4z" : "M8 5v14l11-7z");
+}
+
+function stepChapter(delta) {
+  if (!state.book) return;
+  const c = state.position.c + delta;
+  if (c < 0 || c >= state.book.chapters.length) return;
+  openChapter(c, 0);
+  place.set(state.book, state.position, { flush: true });
+  if (state.playing) restartAt(state.position);
+}
+
+function stepLine(delta) {
+  if (!state.book) return;
+  const queue = readingQueue(state.book.chapters[state.position.c], settings);
+  const starts = [...new Set(queue.map((item) => item.b))];
+  const here = starts.findIndex((b) => b >= state.position.b);
+  const target = starts[Math.max(0, Math.min(starts.length - 1, (here < 0 ? starts.length : here) + delta))];
+  if (target === undefined) return;
+  moveTo({ c: state.position.c, b: target });
+  scrollToCurrent();
+  if (state.playing) restartAt(state.position);
+}
+
+function placesArrived() {
+  if (!state.book) return renderShelf();
+  const saved = place.get(state.book.id);
+  if (!state.playing && saved && (saved.c !== state.position.c || saved.b !== state.position.b)) {
+    openChapter(Math.min(saved.c, state.book.chapters.length - 1), saved.b);
+    scrollToCurrent(true);
+  }
+}
+
+// ---------- Wiring ----------
+
+$("#epub").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  const error = $("#open-error");
+  error.hidden = true;
+  try {
+    const book = await readEpub(file);
+    await shelfStore.put(book);
+    state.books = [...state.books.filter((b) => b.id !== book.id), book];
+    renderShelf();
+    openBook(book);
+  } catch (problem) {
+    error.textContent = problem.message || "Couldn't open that file.";
+    error.hidden = false;
+  }
+});
+
+$("#shelf").addEventListener("click", async (event) => {
+  const open = event.target.closest("[data-open]");
+  if (open) {
+    const book = state.books.find((b) => b.id === open.dataset.open);
+    if (book) openBook(book);
+    return;
+  }
+  const remove = event.target.closest("[data-remove]");
+  if (!remove) return;
+  if (!remove.classList.contains("confirm")) {
+    remove.classList.add("confirm");
+    remove.textContent = "Tap to remove";
+    setTimeout(() => { remove.classList.remove("confirm"); remove.textContent = "Remove"; }, 4000);
+    return;
+  }
+  const id = remove.dataset.remove;
+  await shelfStore.remove(id);
+  place.forget(id);
+  state.books = state.books.filter((b) => b.id !== id);
+  renderShelf();
+});
+
+$("#text").addEventListener("click", (event) => {
+  const target = event.target.closest("[data-b]");
+  if (!target || !state.book) return;
+  moveTo({ c: state.position.c, b: Number(target.dataset.b) });
+  if (state.playing) restartAt(state.position);
+  else play();
+});
+
+for (const type of ["touchmove", "wheel"]) {
+  window.addEventListener(type, () => { state.userScrolledAt = Date.now(); }, { passive: true });
+}
+
+$("#play").addEventListener("click", () => (state.playing ? pause() : play()));
+$("#back").addEventListener("click", closeBook);
+$("#prev-chapter").addEventListener("click", () => stepChapter(-1));
+$("#next-chapter").addEventListener("click", () => stepChapter(1));
+$("#next-inline").addEventListener("click", () => stepChapter(1));
+$("#back-line").addEventListener("click", () => stepLine(-1));
+$("#next-line").addEventListener("click", () => stepLine(1));
+$("#chapter").addEventListener("change", (event) => stepChapter(Number(event.target.value) - state.position.c));
+$("#sleep").addEventListener("change", () => {
+  const minutes = Number($("#sleep").value);
+  state.sleepAt = minutes ? Date.now() + minutes * 60000 : null;
+});
+
+$("#sample").addEventListener("click", async () => {
+  const book = sampleStory();
+  await shelfStore.put(book);
+  state.books = [...state.books.filter((b) => b.id !== book.id), book];
+  renderShelf();
+  openBook(book);
+});
+
+if (synth) {
+  synth.addEventListener?.("voiceschanged", () => { if (state.book) loadVoices(); });
+}
+
+function sampleStory() {
+  const html = `
+    <h2>Chapter 1: The Storm</h2>
+    <p>Notes</p><blockquote><p>A short sample story, so you can hear how reading works. Your own stories come from AO3's EPUB downloads.</p></blockquote>
+    <p>The lamp went out at <em>exactly</em> the wrong moment.</p>
+    <p>“Nooo,” Wren groaned. “Not again!!!”</p>
+    <p>Old Hale didn't look up from his book. “It does that,” he said. “Every storm.”</p>
+    <p>* * *</p>
+    <p>By morning the sea had calmed.<br>The gulls were back.<br>So was the lamp.</p>
+    <h2>Chapter 2: One Hundred and Twelve Steps</h2>
+    <p>There were one hundred and twelve steps between the kitchen and the lamp room. Wren counted every one of them, twice a night, until the counting stopped feeling like work and started feeling like a song.</p>
+    <p>“You'll wear a groove in them,” Hale said.</p>
+    <p>“Good,” said Wren. “Then I'll always know the way.”</p>`;
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+  const blocks = blocksOf(doc.body, 0);
+  const { chapters } = arrange(blocks, { title: "The Lighthouse Keeper's Apprentice (sample)", authors: ["Fic Listener"], description: "", docCount: 1 });
+  return { id: "sample", title: "The Lighthouse Keeper's Apprentice (sample)", author: "Fic Listener", lang: "en", chapters, added: Date.now() };
+}
+
+// ---------- Start ----------
+
+(async function start() {
+  state.books = await shelfStore.all();
+  renderShelf();
+  place.connect();
+})();
+</script>
