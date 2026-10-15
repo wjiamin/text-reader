@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>AO3 Reader</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #f6f3ef;
+    --card: #ffffff;
+    --text: #1e1b18;
+    --muted: #6d655d;
+    --line: #e5dfd8;
+    --accent: #8f2a1f;
+    --accent-text: #ffffff;
+    --accent-soft: #f6e5e1;
+    --ok: #2d6a4a;
+    --notice-bg: #fff3d6;
+    --notice-text: #6e4c00;
+    --error: #a3271b;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 4px 16px rgb(0 0 0 / 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161412;
+      --card: #211e1b;
+      --text: #f2ede7;
+      --muted: #a99f95;
+      --line: #36312c;
+      --accent: #e8796b;
+      --accent-text: #1d0e0b;
+      --accent-soft: #3a2420;
+      --ok: #7cc79d;
+      --notice-bg: #3a3017;
+      --notice-text: #f2d48b;
+      --error: #ff9b8f;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+  body.listening main { padding-bottom: 210px; }
+  h1 { font-size: 1.6rem; line-height: 1.2; margin: 8px 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 1.1rem; line-height: 1.3; margin: 0; overflow-wrap: anywhere; }
+  .intro { color: var(--muted); margin: 0 0 20px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow);
+  }
+  label { display: block; }
+  .label { font-weight: 600; margin-bottom: 6px; }
+  input, select, button { font: inherit; color: inherit; }
+  input[type="text"], select {
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg);
+  }
+  input[type="text"]:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: flex; gap: 8px; }
+  .row input { flex: 1; min-width: 0; }
+  button, .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 8px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  button:disabled { cursor: default; opacity: 0.45; }
+  .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  .quiet { min-height: 36px; padding: 4px 12px; color: var(--muted); }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
+  .options { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; margin-top: 12px; }
+  .options .wide { grid-column: 1 / -1; }
+  .options label > span { display: block; font-size: 0.9rem; color: var(--muted); margin-bottom: 4px; }
+  .check { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+  .check input { width: 20px; height: 20px; accent-color: var(--accent); }
+  .upload { border-top: 1px solid var(--line); padding-top: 12px; }
+  .upload input { margin-top: 8px; max-width: 100%; }
+  .hint { color: var(--muted); font-size: 0.9rem; margin: 4px 0 0; }
+  .error { color: var(--error); margin: 10px 0 0; }
+  .phone { display: flex; gap: 16px; align-items: center; }
+  .phone .qr { flex: none; background: #fff; border-radius: 8px; line-height: 0; }
+  .phone .qr svg { display: block; width: 148px; height: 148px; }
+  .phone p { margin: 6px 0 0; color: var(--muted); font-size: 0.95rem; }
+  .how ol { margin: 8px 0 0; padding-left: 1.3em; }
+  .how li + li { margin-top: 6px; }
+  .job-head { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+  .by { color: var(--muted); margin: 2px 0 0; font-size: 0.95rem; }
+  .status { margin: 12px 0 0; font-weight: 500; }
+  .status.done { color: var(--ok); }
+  .status.failed { color: var(--error); }
+  .bar { height: 6px; border-radius: 3px; background: var(--line); margin-top: 8px; overflow: hidden; }
+  .bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.6s ease; }
+  .notices { list-style: none; padding: 0; margin: 12px 0 0; }
+  .notices li { background: var(--notice-bg); color: var(--notice-text); padding: 8px 12px; border-radius: 8px; font-size: 0.95rem; }
+  .notices li + li { margin-top: 6px; }
+  .download { margin-top: 12px; }
+  .tracks { list-style: none; padding: 0; margin: 12px 0 0; border-top: 1px solid var(--line); }
+  .track { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .track .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .track .meta { color: var(--muted); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  .track.reading .meta { color: var(--accent); font-weight: 600; }
+  .track.waiting .name { color: var(--muted); }
+  .track.playing .name { color: var(--accent); font-weight: 600; }
+  .play { width: 40px; min-height: 40px; padding: 0; border-radius: 50%; flex: none; }
+  .play svg { width: 18px; height: 18px; fill: currentColor; }
+  .track.ready .play { border-color: var(--accent); color: var(--accent); }
+  .track.playing .play { background: var(--accent); color: var(--accent-text); }
+  .library { list-style: none; padding: 0; margin: 8px 0 0; }
+  .library li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .library .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .library .meta { display: block; color: var(--muted); font-size: 0.9rem; }
+  .player {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    background: var(--card);
+    border-top: 1px solid var(--line);
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    box-shadow: 0 -4px 20px rgb(0 0 0 / 0.08);
+  }
+  .player-inner { max-width: 640px; margin: 0 auto; }
+  .now { display: flex; gap: 12px; align-items: center; }
+  .now-text { flex: 1; min-width: 0; }
+  .now-text strong, .now-text span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .now-text span { color: var(--muted); font-size: 0.9rem; }
+  .rate select { width: auto; min-height: 36px; padding: 4px 8px; }
+  audio { width: 100%; margin-top: 8px; }
+  .nav { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 4px; }
+  .nav span { color: var(--muted); font-size: 0.9rem; text-align: center; }
+  .offline {
+    position: fixed; top: 12px; left: 16px; right: 16px; margin: 0 auto; max-width: 608px;
+    background: var(--error); color: #fff; padding: 10px 14px; border-radius: 10px;
+  }
+  @media (max-width: 420px) {
+    .options { grid-template-columns: 1fr; }
+    .phone { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>AO3 Reader</h1>
+  <p class="intro">Paste a link to a work and it's read aloud to you. Each chapter is ready to play as soon as it's read.</p>
+
+  <form id="new" class="card" autocomplete="off">
+    <label class="label" for="link">Link to the work</label>
+    <div class="row">
+      <input id="link" type="text" inputmode="url" autocapitalize="off" spellcheck="false"
+             placeholder="https://archiveofourown.org/works/…">
+      <button id="go" type="submit" class="primary">Read it</button>
+    </div>
+    <p id="form-error" class="error" role="alert" hidden></p>
+    <details>
+      <summary>Voice and options</summary>
+      <div class="options">
+        <label><span>Voice</span><select id="voice"></select></label>
+        <label><span>Reading speed</span>
+          <select id="speed">
+            <option value="0.9">A little slower</option>
+            <option value="1" selected>Normal</option>
+            <option value="1.1">A little faster</option>
+            <option value="1.25">Faster</option>
+          </select>
+        </label>
+        <label class="wide"><span>Only these chapters</span>
+          <input id="chapters" type="text" placeholder="All of them, or for example 1-3, 5, 8-">
+        </label>
+        <label class="check"><input id="summary" type="checkbox" checked> Read the summaries</label>
+        <label class="check"><input id="notes" type="checkbox"> Read the author's notes</label>
+        <div class="wide upload">
+          <label for="page"><strong>Locked work, or AO3 won't let it download?</strong></label>
+          <p class="hint">Open it in your browser (logged in), click <em>Entire Work</em>, save the page, then choose the saved file here and press Read it.</p>
+          <input id="page" type="file" accept=".html,.htm,text/html">
+        </div>
+      </div>
+    </details>
+  </form>
+
+  <section id="jobs" aria-live="polite"></section>
+
+  <section id="how" class="card how">
+    <h2>How it works</h2>
+    <ol>
+      <li>Paste a link to a work on AO3 and press <strong>Read it</strong>.</li>
+      <li>The first part is ready in a minute or two. Press play and listen while the rest is read.</li>
+      <li>When it's all done, download the audiobook to keep it on your phone.</li>
+    </ol>
+  </section>
+
+  <section id="phone" class="card phone" hidden>
+    <div class="qr" aria-hidden="true"></div>
+    <div>
+      <h2>Listen on your phone</h2>
+      <p>Point your phone's camera at this code. Your phone needs to be on the same Wi-Fi, and this computer needs to stay on while it reads.</p>
+    </div>
+  </section>
+
+  <section id="library-section" class="card" hidden>
+    <h2>Your audiobooks</h2>
+    <ul id="library" class="library"></ul>
+    <p class="hint">To keep one on your phone, download it, then open it with Books or BookPlayer on an iPhone, or an audiobook app such as Voice on Android.</p>
+  </section>
+
+  <noscript><p class="error">This page needs JavaScript turned on.</p></noscript>
+</main>
+
+<div id="player" class="player" hidden>
+  <div class="player-inner">
+    <div class="now">
+      <div class="now-text"><strong id="now-title"></strong><span id="now-work"></span></div>
+      <label class="rate">
+        <select id="rate" aria-label="Playback speed">
+          <option value="1">1×</option>
+          <option value="1.1">1.1×</option>
+          <option value="1.25">1.25×</option>
+          <option value="1.5">1.5×</option>
+          <option value="1.75">1.75×</option>
+          <option value="2">2×</option>
+        </select>
+      </label>
+    </div>
+    <audio id="audio" controls preload="metadata"></audio>
+    <div class="nav">
+      <button id="prev" type="button" class="quiet">‹ Previous</button>
+      <span id="waiting" hidden>Next part is still being read. It'll start when it's ready.</span>
+      <button id="next" type="button" class="quiet">Next ›</button>
+    </div>
+  </div>
+</div>
+
+<p id="offline" class="offline" role="alert" hidden>Can't reach the computer running AO3 Reader. Is it still on?</p>
+
+<template id="card-template">
+  <article class="card job">
+    <div class="job-head">
+      <div><h2></h2><p class="by"></p></div>
+      <button type="button" class="quiet stop">Stop</button>
+    </div>
+    <p class="status"></p>
+    <div class="bar"><span></span></div>
+    <ul class="notices"></ul>
+    <p class="error" hidden></p>
+    <div class="download" hidden>
+      <a class="button primary">Download the audiobook</a>
+      <p class="hint">On an iPhone, open it from the Files app with Books or BookPlayer. On Android, open it with an audiobook app such as Voice.</p>
+    </div>
+    <ol class="tracks"></ol>
+  </article>
+</template>
+
+<template id="track-template">
+  <li class="track">
+    <button type="button" class="play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+    <span class="name"></span>
+    <span class="meta"></span>
+  </li>
+</template>
+
+<script>
+"use strict";
+
+const $ = (selector, root = document) => root.querySelector(selector);
+const FINISHED = ["done", "failed", "stopped"];
+const audio = $("#audio");
+const saved = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch { /* private browsing */ } },
+};
+
+let state = null;
+let timer = null;
+let nowPlaying = null;   // {job, index}
+let waitingFor = null;   // the next part, when it isn't read yet
+let lastPositionSave = 0;
+const cards = new Map();
+
+function clock(seconds) {
+  const s = Math.round(seconds || 0);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(r)}` : `${m}:${pad(r)}`;
+}
+
+function findJob(id) { return state && state.jobs.find((job) => job.id === id); }
+function findTrack(id, index) { const job = findJob(id); return job && job.tracks[index]; }
+
+async function refresh() {
+  clearTimeout(timer);
+  let busy = false;
+  try {
+    const response = await fetch("/api/state", { cache: "no-store" });
+    if (!response.ok) throw new Error(String(response.status));
+    state = await response.json();
+    $("#offline").hidden = true;
+    draw();
+    busy = state.jobs.some((job) => !FINISHED.includes(job.state));
+  } catch {
+    $("#offline").hidden = false;
+  }
+  timer = setTimeout(refresh, busy ? 1500 : 5000);
+}
+
+function draw() {
+  fillVoices();
+  drawPhone();
+  drawJobs();
+  drawLibrary();
+  $("#how").hidden = state.jobs.length > 0;
+  if (waitingFor && findTrack(waitingFor.job, waitingFor.index)?.state === "ready") {
+    const next = waitingFor;
+    play(next.job, next.index);
+  }
+  $("#waiting").hidden = !waitingFor;
+}
+
+function fillVoices() {
+  const select = $("#voice");
+  if (select.options.length) return;
+  for (const voice of state.voices) {
+    const name = voice.id.slice(3);
+    select.add(new Option(`${name[0].toUpperCase()}${name.slice(1)} · ${voice.label}`, voice.id));
+  }
+  select.value = saved.get("voice") || state.default_voice;
+  if (!select.value) select.value = state.default_voice;
+}
+
+function drawPhone() {
+  const section = $("#phone");
+  if (!state.phone || !state.phone.qr || !section.hidden) return;
+  $(".qr", section).innerHTML = state.phone.qr;
+  section.hidden = false;
+}
+
+function drawJobs() {
+  const list = $("#jobs");
+  state.jobs.forEach((job, position) => {
+    let card = cards.get(job.id);
+    if (!card) {
+      card = { el: $("#card-template").content.firstElementChild.cloneNode(true), rows: [] };
+      card.el.dataset.job = job.id;
+      cards.set(job.id, card);
+    }
+    updateCard(card, job);
+    if (list.children[position] !== card.el) list.insertBefore(card.el, list.children[position] || null);
+  });
+}
+
+function updateCard(card, job) {
+  const el = card.el;
+  const active = !FINISHED.includes(job.state);
+  $("h2", el).textContent = job.title || (job.state === "failed" ? "Couldn't get this work" : "Getting the work…");
+  const by = [];
+  if (job.author) by.push(`by ${job.author}`);
+  if (job.words) by.push(`${job.words.toLocaleString()} words`);
+  if (job.length) by.push(`about ${job.length} of listening`);
+  $(".by", el).textContent = by.join(" · ");
+  const status = $(".status", el);
+  status.textContent = job.message + (job.left ? ` · about ${job.left} left` : "");
+  status.className = `status ${job.state}`;
+  $(".stop", el).hidden = !active;
+  $(".stop", el).dataset.job = job.id;
+  $(".bar", el).hidden = !active || !job.tracks.length;
+  $(".bar span", el).style.width = `${Math.round(job.progress * 100)}%`;
+
+  const notices = $(".notices", el);
+  if (notices.dataset.key !== job.warnings.join("\n")) {
+    notices.dataset.key = job.warnings.join("\n");
+    notices.replaceChildren(...job.warnings.map((text) => Object.assign(document.createElement("li"), { textContent: text })));
+  }
+
+  const error = $(".error", el);
+  error.hidden = !job.error;
+  error.textContent = job.error
+    ? job.error + (/save the page/i.test(job.error) ? " Choose the saved file under “Voice and options” above." : "")
+    : "";
+
+  $(".download", el).hidden = !job.download;
+  if (job.download) $(".download a", el).href = `${job.download}?download=1`;
+
+  const list = $(".tracks", el);
+  job.tracks.forEach((track, index) => {
+    let row = card.rows[index];
+    if (!row) {
+      row = $("#track-template").content.firstElementChild.cloneNode(true);
+      card.rows[index] = row;
+      list.append(row);
+    }
+    const playing = nowPlaying && nowPlaying.job === job.id && nowPlaying.index === index;
+    row.className = `track ${track.state}${playing ? " playing" : ""}`;
+    $(".name", row).textContent = track.title;
+    $(".meta", row).textContent =
+      track.state === "ready" ? clock(track.seconds) : track.state === "reading" ? `${Math.round(track.progress * 100)}%` : "";
+    const button = $(".play", row);
+    button.disabled = track.state !== "ready";
+    button.dataset.job = job.id;
+    button.dataset.index = index;
+    button.setAttribute("aria-label", `Play ${track.title}`);
+  });
+}
+
+let libraryKey = "";
+function drawLibrary() {
+  const key = JSON.stringify(state.library);
+  if (key === libraryKey) return;
+  libraryKey = key;
+  $("#library-section").hidden = !state.library.length;
+  $("#library").replaceChildren(...state.library.map((book) => {
+    const item = document.createElement("li");
+    const name = Object.assign(document.createElement("div"), { className: "name", textContent: book.name });
+    name.append(Object.assign(document.createElement("span"), { className: "meta", textContent: `${book.size_mb} MB` }));
+    const link = Object.assign(document.createElement("a"), { className: "button", href: `${book.url}?download=1`, textContent: "Download" });
+    item.append(name, link);
+    return item;
+  }));
+}
+
+function play(jobId, index) {
+  const job = findJob(jobId);
+  const track = job && job.tracks[index];
+  if (!track || track.state !== "ready") return;
+  nowPlaying = { job: jobId, index };
+  waitingFor = null;
+  $("#waiting").hidden = true;
+  const resumeAt = Number(saved.get(`pos:${track.audio}`)) || 0;
+  audio.src = track.audio;
+  audio.addEventListener("loadedmetadata", () => {
+    audio.playbackRate = Number($("#rate").value);
+    if (resumeAt > 0 && resumeAt < audio.duration - 3) audio.currentTime = resumeAt;
+  }, { once: true });
+  audio.play().catch(() => { /* the listener can press play */ });
+  $("#player").hidden = false;
+  document.body.classList.add("listening");
+  $("#now-title").textContent = track.title;
+  $("#now-work").textContent = [job.title, job.author].filter(Boolean).join(" · ");
+  if ("mediaSession" in navigator && "MediaMetadata" in window) {
+    navigator.mediaSession.metadata = new MediaMetadata({ title: track.title, artist: job.author || "", album: job.title || "" });
+  }
+  drawJobs();
+}
+
+function step(delta) {
+  if (!nowPlaying) return;
+  const job = findJob(nowPlaying.job);
+  const index = nowPlaying.index + delta;
+  if (!job || index < 0 || index >= job.tracks.length) return;
+  if (job.tracks[index].state === "ready") {
+    play(nowPlaying.job, index);
+  } else if (delta > 0) {
+    waitingFor = { job: nowPlaying.job, index };
+    $("#waiting").hidden = false;
+  }
+}
+
+audio.addEventListener("ended", () => {
+  const track = nowPlaying && findTrack(nowPlaying.job, nowPlaying.index);
+  if (track) saved.set(`pos:${track.audio}`, "0");
+  step(1);
+});
+audio.addEventListener("timeupdate", () => {
+  if (!nowPlaying || Date.now() - lastPositionSave < 5000) return;
+  lastPositionSave = Date.now();
+  const track = findTrack(nowPlaying.job, nowPlaying.index);
+  if (track) saved.set(`pos:${track.audio}`, String(audio.currentTime));
+});
+$("#prev").addEventListener("click", () => step(-1));
+$("#next").addEventListener("click", () => step(1));
+$("#rate").value = saved.get("rate") || "1";
+$("#rate").addEventListener("change", () => {
+  audio.playbackRate = Number($("#rate").value);
+  saved.set("rate", $("#rate").value);
+});
+if ("mediaSession" in navigator) {
+  navigator.mediaSession.setActionHandler("previoustrack", () => step(-1));
+  navigator.mediaSession.setActionHandler("nexttrack", () => step(1));
+}
+
+$("#jobs").addEventListener("click", async (event) => {
+  const playButton = event.target.closest(".play");
+  if (playButton && !playButton.disabled) {
+    play(playButton.dataset.job, Number(playButton.dataset.index));
+    return;
+  }
+  const stopButton = event.target.closest(".stop");
+  if (stopButton) {
+    stopButton.disabled = true;
+    await fetch(`/api/jobs/${stopButton.dataset.job}/stop`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }).catch(() => {});
+    stopButton.disabled = false;
+    refresh();
+  }
+});
+
+for (const id of ["speed", "summary", "notes"]) {
+  const input = $(`#${id}`);
+  const value = saved.get(id);
+  if (value !== null) input.type === "checkbox" ? (input.checked = value === "true") : (input.value = value);
+}
+
+$("#new").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = $("#form-error");
+  error.hidden = true;
+  const file = $("#page").files[0];
+  const body = {
+    link: $("#link").value.trim(),
+    voice: $("#voice").value,
+    speed: Number($("#speed").value),
+    chapters: $("#chapters").value.trim(),
+    summary: $("#summary").checked,
+    notes: $("#notes").checked,
+  };
+  if (file) {
+    body.html = await file.text();
+    body.link = "";
+  }
+  if (!body.link && !body.html) {
+    error.textContent = "Paste a link to a work first.";
+    error.hidden = false;
+    return;
+  }
+  saved.set("voice", body.voice);
+  saved.set("speed", String(body.speed));
+  saved.set("summary", String(body.summary));
+  saved.set("notes", String(body.notes));
+
+  const button = $("#go");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/jobs", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "Something went wrong. Try again?");
+    $("#link").value = "";
+    $("#page").value = "";
+    $("#chapters").value = "";
+    await refresh();
+  } catch (problem) {
+    error.textContent = problem.message;
+    error.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+refresh();
+</script>
+</body>
+</html>

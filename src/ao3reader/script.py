@@ -87,6 +87,38 @@ def estimated_minutes(words: int, speed: float = 1.0) -> float:
     return words / (WORDS_PER_MINUTE * speed)
 
 
+def notices(work: Work, voice: str | None = None) -> list[str]:
+    """Things worth telling the listener before the reading starts."""
+    found = []
+    have = len(work.chapters)
+    if work.posted_chapters and have < work.posted_chapters:
+        found.append(
+            f"This page only has {have} of the {work.posted_chapters} chapters. "
+            "Save the page again after clicking 'Entire Work' to get them all."
+        )
+    if voice and voice[:1] in "ab" and work.language and work.language != "English":
+        found.append(
+            f"This work is in {work.language} but the voice {voice} speaks English, "
+            "so pick a voice for that language."
+        )
+    return found
+
+
+def parse_chapters(spec: str, last: int) -> set[int]:
+    """'1-3,5,8-' -> {1, 2, 3, 5, 8, ..., last}"""
+    chosen: set[int] = set()
+    for part in spec.split(","):
+        match = re.fullmatch(r"\s*(\d+)\s*(?:(-)\s*(\d+)?)?\s*", part)
+        if not match:
+            raise ValueError(f"Can't read chapters {spec!r}; use something like 1-3,5,8-")
+        start = int(match.group(1))
+        end = int(match.group(3)) if match.group(3) else (last if match.group(2) else start)
+        if start < 1 or end < start:
+            raise ValueError(f"Can't read chapters {spec!r}; use something like 1-3,5,8-")
+        chosen.update(range(start, end + 1))
+    return chosen
+
+
 def _spoken_heading(title: str) -> str:
     # "Chapter 3: The Return" reads better with a full stop than a colon
     return re.sub(r"^(Chapter \d+)\s*:\s*", r"\1. ", title)

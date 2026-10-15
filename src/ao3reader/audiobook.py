@@ -70,7 +70,13 @@ def make_audiobook(
                 f"in {format_duration(took)} ({speedup:.1f}x real time)"
             )
         rendered.append(result)
+    return write_audiobook(work, rendered, out_dir, fmt, name_suffix)
 
+
+def write_audiobook(
+    work: Work, rendered: list[Rendered], out_dir: Path, fmt: str = "m4b", name_suffix: str = ""
+) -> Path:
+    """Package spoken tracks as one .m4b, or a folder of MP3s; returns its path."""
     name = safe_filename(f"{work.title} - {work.author}{name_suffix}")
     tags = {
         "title": work.title,
@@ -240,7 +246,9 @@ def format_duration(seconds: float) -> str:
     seconds = round(seconds)
     hours, rest = divmod(seconds, 3600)
     minutes, seconds = divmod(rest, 60)
-    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m {seconds:02d}s"
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    return f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
 
 
 class _Status:

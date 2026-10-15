@@ -5,12 +5,14 @@ you can listen to on your phone. The voice is [Kokoro](https://huggingface.co/he
 a small open model that sounds natural and runs on an ordinary computer: no
 GPU, no account, nothing sent to anyone.
 
-```
-ao3-reader make https://archiveofourown.org/works/12345678
-```
+Type `ao3-reader` and a page opens in your browser. Paste a link to a work and
+press **Read it**. Each chapter is ready to play as soon as it's read, so you
+can start listening within a minute or two while the rest is read. At the end
+you get one audiobook file with a chapter marker for every chapter, to keep
+on your phone.
 
-gives you `Title - Author.m4b`: one audiobook file with a chapter marker for
-every chapter, ready for your phone's audiobook app.
+Your phone can use the page too: scan the QR code it shows, and paste links
+and listen right on your phone while it's on the same Wi-Fi as the computer.
 
 ## What it does for you
 
@@ -40,7 +42,37 @@ uv tool install git+https://github.com/wjiamin/text-reader
 The first time you make an audiobook it downloads the voice model, about
 340 MB. It's kept for next time.
 
-## Making an audiobook
+## The web page
+
+```
+ao3-reader
+```
+
+opens the page at http://127.0.0.1:8000. Keep the window that started it open
+while it reads; press Ctrl+C there to quit.
+
+- **Paste a link, press Read it.** The parts appear as a list with play buttons
+  that light up as each one is read. Playback carries on to the next part by
+  itself and remembers where you stopped.
+- **On your phone:** scan the QR code shown on the computer's page (or open the
+  link printed in the window). The link carries a private key, so other people
+  on your Wi-Fi can't use it. Your phone remembers the key after the first
+  scan. The computer has to stay on and awake while you listen this way.
+- **To keep it:** when it's finished, press **Download the audiobook**. Finished
+  audiobooks are also saved in an `AO3 Audiobooks` folder in your home folder,
+  and listed on the page under "Your audiobooks".
+- **Voice and options** on the page lets you pick a voice, read faster or slower,
+  read only some chapters, include author's notes, or upload a saved page for
+  locked works.
+
+To change how it starts, use `ao3-reader web` with options: `--port 8080` for
+another port, `--no-phone` to allow only this computer, `-o FOLDER` to save
+audiobooks somewhere else, and `--no-browser` to not open the page
+automatically. For example: `ao3-reader web --port 8080`.
+
+## Making an audiobook from the command line
+
+If you'd rather not use the web page:
 
 ```
 ao3-reader make https://archiveofourown.org/works/12345678
@@ -118,7 +150,8 @@ turns automated downloads away. Either way:
 1. Open the work in your browser (logged in if needed).
 2. Click **Entire Work** so every chapter is on one page.
 3. Save the page (Ctrl+S, or Cmd+S on a Mac).
-4. Run `ao3-reader make "The Saved Page.html"`.
+4. On the web page, choose the saved file under **Voice and options** and press
+   **Read it**. From the command line: `ao3-reader make "The Saved Page.html"`.
 
 ## Being a good guest
 
@@ -139,4 +172,5 @@ uv venv && uv pip install -e ".[dev]"
 
 The code is in `src/ao3reader/`: `fetch.py` downloads, `parse.py` reads the AO3
 page, `clean.py` and `script.py` decide what gets said, `tts.py` is the voice,
-and `audiobook.py` caches chapters and packages the file.
+`audiobook.py` caches chapters and packages the file, and `web.py` with
+`static/index.html` is the web page.

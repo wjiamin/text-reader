@@ -1,7 +1,6 @@
 """The ao3-reader command."""
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -10,7 +9,17 @@ from .audiobook import FORMATS, format_duration, make_audiobook, speak_to_wav
 from .clean import Pronunciations
 from .fetch import FetchError, fetch_work, parse_work_id
 from .parse import ParseError, Work, parse_work
-from .script import PARAGRAPH, SCENE_BREAK, Line, Options, Track, build_tracks, estimated_minutes
+from .script import (
+    PARAGRAPH,
+    SCENE_BREAK,
+    Line,
+    Options,
+    Track,
+    build_tracks,
+    estimated_minutes,
+    notices,
+    parse_chapters,
+)
 from .tts import DEFAULT_VOICE, LANGUAGES, MODELS, RECOMMENDED_VOICES, KokoroVoice
 
 SAMPLE_TEXT = (
@@ -36,15 +45,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _make(args: argparse.Namespace) -> None:
-    work = _load(args.work)
+    work = _load(args.work, args.voice)
     tracks = build_tracks(work, _options(args, work))
     if not tracks:
         raise ValueError("There's nothing to read in the chosen chapters.")
-    if work.language and work.language != "English" and args.voice[:1] in "ab":
-        _note(
-            f"This work is in {work.language} but {args.voice} speaks English. "
-            "Pick another voice with --voice (see 'ao3-reader voices')."
-        )
 
     words = sum(track.words for track in tracks)
     minutes = estimated_minutes(words, args.speed)
@@ -54,6 +58,12 @@ def _make(args: argparse.Namespace) -> None:
     suffix = f" (chapters {args.chapters})" if args.chapters else ""
     out = make_audiobook(work, tracks, voice, args.out, args.format, args.bitrate, suffix)
     print(f"Done: {out}")
+
+
+def _web(args: argparse.Namespace) -> None:
+    from .web import serve
+
+    serve(port=args.port, phone=args.phone, library=args.out, open_browser=args.browser)
 
 
 def _preview(args: argparse.Namespace) -> None:
@@ -92,7 +102,7 @@ def _sample(args: argparse.Namespace) -> None:
         print(path)
 
 
-def _load(ref: str) -> Work:
+def _load(ref: str, voice: str | None = None) -> Work:
     path = Path(ref).expanduser()
     if path.is_file():
         work = parse_work(path.read_text(encoding="utf-8", errors="replace"))
@@ -103,11 +113,8 @@ def _load(ref: str) -> Work:
 
     chapters = len(work.chapters)
     _note(f"“{work.title}” by {work.author}: {chapters} chapter{'s' * (chapters != 1)}")
-    if work.posted_chapters and chapters < work.posted_chapters:
-        _note(
-            f"This page only has {chapters} of the {work.posted_chapters} chapters. "
-            "Save the page again after clicking 'Entire Work' to get them all."
-        )
+    for notice in notices(work, voice):
+        _note(notice)
     return work
 
 
@@ -120,21 +127,6 @@ def _options(args: argparse.Namespace, work: Work) -> Options:
     )
 
 
-def parse_chapters(spec: str, last: int) -> set[int]:
-    """'1-3,5,8-' -> {1, 2, 3, 5, 8, ..., last}"""
-    chosen: set[int] = set()
-    for part in spec.split(","):
-        match = re.fullmatch(r"\s*(\d+)\s*(?:(-)\s*(\d+)?)?\s*", part)
-        if not match:
-            raise ValueError(f"Can't read chapters {spec!r}; use something like 1-3,5,8-")
-        start = int(match.group(1))
-        end = int(match.group(3)) if match.group(3) else (last if match.group(2) else start)
-        if start < 1 or end < start:
-            raise ValueError(f"Can't read chapters {spec!r}; use something like 1-3,5,8-")
-        chosen.update(range(start, end + 1))
-    return chosen
-
-
 def _note(message: str) -> None:
     print(message, file=sys.stderr)
 
@@ -145,7 +137,25 @@ def _parser() -> argparse.ArgumentParser:
         description="Turn AO3 works into audiobooks read by a voice running on your computer.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    commands = parser.add_subparsers(title="commands", required=True, metavar="COMMAND")
+    parser.set_defaults(run=_web, port=8000, phone=True, out=None, browser=True)
+    commands = parser.add_subparsers(
+        title="commands", metavar="COMMAND",
+        description="With no command, ao3-reader opens its web page.",
+    )
+
+    web = commands.add_parser(
+        "web", help="open the web page: paste a link, listen as it's read (the default)",
+        description="Open a web page for making audiobooks. Phones on the same Wi-Fi "
+        "can use it too, through the private link and QR code it shows.",
+    )
+    web.add_argument("--port", type=int, default=8000, help="(default 8000)")
+    web.add_argument(
+        "--no-phone", dest="phone", action="store_false",
+        help="only allow this computer, not phones on the same Wi-Fi",
+    )
+    web.add_argument("-o", "--out", type=Path, help="folder for finished audiobooks (default: ~/AO3 Audiobooks)")
+    web.add_argument("--no-browser", dest="browser", action="store_false", help="don't open the page automatically")
+    web.set_defaults(run=_web)
 
     reading = argparse.ArgumentParser(add_help=False)
     reading.add_argument("work", help="an AO3 link or work ID, or a saved AO3 work page (.html)")
