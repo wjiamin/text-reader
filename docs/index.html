@@ -226,7 +226,7 @@
         <p>Your iPhone stops a web page from talking when the screen locks, so this reader keeps the screen on while it reads.</p>
       </details>
       <p id="sync-note" class="sync">Your place is saved on this phone.</p>
-      <p class="sync">Fic Listener version 4</p>
+      <p class="sync">Fic Listener version 5</p>
     </section>
 
     <section id="reader-view" class="reader" hidden>
@@ -779,6 +779,23 @@ const isNatural = (value) => typeof value === "string" && value.startsWith("koko
 // It runs in a background worker (its source is built from this function), or
 // on the page itself when the worker can't start.
 async function loadKokoro(options, report) {
+  // Safari can't loop over a data stream with "for await", which the voice's
+  // pronunciation dictionary does as it unpacks. Teach it how.
+  const streams = globalThis.ReadableStream && ReadableStream.prototype;
+  if (streams && !streams[Symbol.asyncIterator]) {
+    streams[Symbol.asyncIterator] = async function* () {
+      const reader = this.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          yield value;
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    };
+  }
   report({ type: "stage", stage: "library" });
   const { KokoroTTS, env } = await import(options.library);
   if (options.wasmPaths) env.wasmPaths = options.wasmPaths;
@@ -854,7 +871,20 @@ const natural = {
       }
       this.stage = "starting";
       this.lastHeard = Date.now();
-      this.tts = await this.watch(loadKokoro(options, (message) => this.heard(message)), NATURAL.stallMs);
+      // The library sometimes fails out of band, in a promise nobody waits on
+      let onFailure;
+      const failed = new Promise((_, reject) => {
+        onFailure = (event) => reject(new Error(event.reason?.message || String(event.reason)));
+        window.addEventListener("unhandledrejection", onFailure);
+      });
+      try {
+        this.tts = await this.watch(
+          Promise.race([loadKokoro(options, (message) => this.heard(message)), failed]),
+          NATURAL.stallMs,
+        );
+      } finally {
+        window.removeEventListener("unhandledrejection", onFailure);
+      }
       this.mode = "page";
     })().catch((error) => {
       this.reset();

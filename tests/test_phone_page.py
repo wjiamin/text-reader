@@ -415,3 +415,18 @@ def test_status_counts_while_the_voice_gets_ready(browser, site, tmp_path):
     page.wait_for_function("/Setting up the voice.* [2-9] s/.test(document.querySelector('#natural-status').textContent)")
     page.click("#play")
     page.context.close()
+
+
+SAFARI_STREAMS = "delete ReadableStream.prototype[Symbol.asyncIterator]; delete ReadableStream.prototype.values;"
+
+
+def test_natural_voice_works_without_stream_looping_like_safari(browser, site, tmp_path):
+    # Safari can't loop over streams with "for await"; on an iPhone the real voice
+    # failed with "undefined is not a function (near '...e of A...')"
+    config = "window.FIC_LISTENER_CONFIG = { library: location.origin + '/tests/fixtures/stream-kokoro.js', worker: false };"
+    page = new_page(browser, site, FAKE_SPEECH, SAFARI_STREAMS, config)
+    open_epub(page, one_shot(tmp_path / "tea.epub"))
+    read_to_end(page)
+    assert page.evaluate("natural.mode") == "page"
+    assert page.errors == []
+    page.context.close()
