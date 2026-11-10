@@ -97,10 +97,10 @@ basic ones, so they sound robotic, and they stop when the screen locks.
 A copy also runs as a private claude.ai page, which saves your place to your
 Claude account, but claude.ai pages can't download the natural voice.
 
-The page is `phone/index.html`; `docs/index.html` is the GitHub Pages copy,
-made with `python tools/build_pages.py`. To publish it, turn on GitHub Pages
-in the repository's Settings → Pages: deploy from the `main` branch, `/docs`
-folder.
+The page is `phone/index.html`; `docs/index.html` is the website copy, made
+with `python tools/build_pages.py`. The site is published from the `gh-pages`
+branch, which holds that copy as its `index.html`: after changing the page,
+rebuild it and copy `docs/index.html` there.
 
 ## Making an audiobook from the command line
 
