@@ -31,7 +31,7 @@ const voices = [
 ];
 const fake = {
   speaking: false, pending: false, current: null,
-  getVoices() { return voices; },
+  getVoices() { return window.__voiceList || voices; },
   speak(u) {
     window.__spoken.push({ text: u.text, voice: u.voice ? u.voice.name : null });
     this.speaking = true;
@@ -52,6 +52,7 @@ const fake = {
   pause() {}, resume() {}, addEventListener() {},
 };
 Object.defineProperty(window, "speechSynthesis", { value: fake, configurable: true });
+window.__allVoices = voices;
 """
 
 
@@ -240,3 +241,22 @@ def test_sample_story_and_bad_files(page, tmp_path):
     page.wait_for_selector("#reader-view:not([hidden])")
     assert page.eval_on_selector_all("#chapter option", "els => els.length") == 2
     assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+
+
+def test_voices_that_arrive_late_are_picked_up(page, tmp_path):
+    # Phones often list only the basic voice at first and add the rest a moment later
+    page.evaluate("window.__voiceList = [window.__allVoices[0]]")
+    open_epub(page, one_shot(tmp_path / "tea.epub"))
+    page.click("#settings summary")
+    assert page.eval_on_selector_all("#voice option", "els => els.map(e => e.textContent)") == [
+        "Phone's default voice",
+        "Samantha (en-US)",
+    ]
+
+    page.evaluate("window.__voiceList = null")
+    page.wait_for_function("document.querySelector('#voice').selectedOptions[0].textContent.includes('Ava')")
+    assert "2 voices" in page.inner_text("#voice-count")
+
+    page.click("#list-voices")
+    listed = page.inner_text("#all-voices")
+    assert "Zarvox" in listed and "com.apple.voice.premium.en-US.Ava" in listed

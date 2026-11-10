@@ -165,6 +165,11 @@
   .check input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
   .check small { display: block; color: var(--muted); font-size: 0.8rem; }
   .notice { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; }
+  .quiet.small { min-height: 36px; font-size: 0.85rem; margin-top: 8px; }
+  .all-voices {
+    margin: 8px 0 0; padding-left: 1.2em; color: var(--muted); font-size: 0.8rem;
+    overflow-wrap: anywhere; user-select: text; -webkit-user-select: text;
+  }
 
   @media (max-width: 360px) { .settings-grid { grid-template-columns: 1fr; } }
   @media (prefers-reduced-motion: no-preference) { .meter span { transition: width 0.4s ease; } }
@@ -266,6 +271,10 @@
         </label>
       </div>
       <p id="voice-tip" class="notice" hidden>For a more natural voice, download an Enhanced or Premium voice in your iPhone's settings (see the tip on the stories page).</p>
+      <p id="voice-count" class="notice"></p>
+      <p class="notice">Downloaded a voice and don't see it? Close Safari completely (swipe it away in the app switcher), open it again, and come back here. Use Safari itself, not a page inside another app.</p>
+      <button id="list-voices" class="quiet small" type="button">List every voice this phone offers</button>
+      <ul id="all-voices" class="all-voices" hidden></ul>
     </details>
   </div>
 </div>
@@ -733,6 +742,36 @@ function loadVoices() {
   const best = voices.find((v) => voiceRank(v) <= 1);
   select.value = voices.some((v) => v.voiceURI === chosen) ? chosen : best ? best.voiceURI : "";
   $("#voice-tip").hidden = Boolean(best);
+  $("#voice-count").textContent = all.length
+    ? `This browser offers ${voices.length} voice${voices.length === 1 ? "" : "s"} for this story's language.`
+    : "This browser hasn't listed any voices yet.";
+  if (!$("#all-voices").hidden) listAllVoices();
+}
+
+// iPhones fill in the voice list a moment after a page first asks, often
+// without announcing it, so ask again for a few seconds
+let voiceChecks = null;
+function watchVoices() {
+  clearInterval(voiceChecks);
+  let checks = 0;
+  let seen = -1;
+  voiceChecks = setInterval(() => {
+    const count = synth ? synth.getVoices().length : 0;
+    if (count !== seen) { seen = count; loadVoices(); }
+    if (++checks >= 12) clearInterval(voiceChecks);
+  }, 500);
+}
+
+function listAllVoices() {
+  const list = $("#all-voices");
+  const all = synth ? [...synth.getVoices()] : [];
+  all.sort((a, b) => a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name));
+  list.replaceChildren(...(all.length ? all : [{ name: "No voices listed", lang: "", voiceURI: "" }]).map((voice) => {
+    const item = document.createElement("li");
+    item.textContent = [voice.name, voice.lang, voice.voiceURI].filter(Boolean).join(" · ");
+    return item;
+  }));
+  list.hidden = false;
 }
 
 function currentVoice() {
@@ -936,8 +975,10 @@ function updateMediaSession() {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     if (state.book) place.set(state.book, state.position, { flush: true });
-  } else if (state.playing) {
-    holdScreen();
+  } else {
+    if (state.playing) holdScreen();
+    // Coming back from Settings after downloading a voice
+    if (state.book) watchVoices();
   }
 });
 
@@ -1002,6 +1043,7 @@ function openBook(book) {
   $("#player").hidden = false;
   $("#back").hidden = false;
   loadVoices();
+  watchVoices();
   openChapter(c, saved ? saved.b : 0);
   scrollToCurrent(true);
 }
@@ -1240,6 +1282,8 @@ $("#sample").addEventListener("click", async () => {
 if (synth) {
   synth.addEventListener?.("voiceschanged", () => { if (state.book) loadVoices(); });
 }
+$("#list-voices").addEventListener("click", listAllVoices);
+$("#settings").addEventListener("toggle", () => { if ($("#settings").open && state.book) watchVoices(); });
 
 function sampleStory() {
   const html = `
