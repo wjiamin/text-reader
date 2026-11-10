@@ -369,3 +369,49 @@ def test_github_pages_copy_is_up_to_date():
     build = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(build)
     assert build.OUTPUT.read_text(encoding="utf-8") == build.render(), "run: python tools/build_pages.py"
+
+
+def voice_page(browser, site, library, extra=""):
+    """The page with a stand-in for the voice library, loaded the real way."""
+    config = f"window.FIC_LISTENER_CONFIG = {{ library: location.origin + '/tests/fixtures/{library}', {extra} }};"
+    return new_page(browser, site, FAKE_SPEECH, config)
+
+
+@pytest.mark.parametrize("extra, mode", [("", "worker"), ("worker: false", "page"), ("startMs: 0", "page")])
+def test_natural_voice_runs_in_a_worker_or_on_the_page(browser, site, tmp_path, extra, mode):
+    page = voice_page(browser, site, "fake-kokoro.js", extra)
+    open_epub(page, one_shot(tmp_path / "tea.epub"))
+    read_to_end(page)
+    assert page.evaluate("natural.mode") == mode
+    assert spoken(page) == []
+    assert page.errors == []
+    page.context.close()
+
+
+def test_a_stuck_voice_says_so_instead_of_waiting_forever(browser, site, tmp_path):
+    page = voice_page(browser, site, "stuck-kokoro.js", "stallMs: 3000")
+    open_epub(page, one_shot(tmp_path / "tea.epub"))
+    page.click("#play")
+    page.wait_for_function("document.querySelector('#natural-status').textContent.includes('stopped responding')")
+    status = page.inner_text("#natural-status")
+    assert "couldn't start on this phone" in status and "pick a phone voice" in status
+    assert page.get_attribute("#play", "aria-label") == "Read aloud"
+    page.context.close()
+
+
+def test_a_failing_voice_says_why(browser, site, tmp_path):
+    page = voice_page(browser, site, "failing-kokoro.js")
+    open_epub(page, one_shot(tmp_path / "tea.epub"))
+    page.click("#play")
+    page.wait_for_function("document.querySelector('#natural-status').textContent.includes('Out of memory')")
+    assert page.evaluate("natural.mode") == ""
+    page.context.close()
+
+
+def test_status_counts_while_the_voice_gets_ready(browser, site, tmp_path):
+    page = voice_page(browser, site, "stuck-kokoro.js", "stallMs: 60000")
+    open_epub(page, one_shot(tmp_path / "tea.epub"))
+    page.click("#play")
+    page.wait_for_function("/Setting up the voice.* [2-9] s/.test(document.querySelector('#natural-status').textContent)")
+    page.click("#play")
+    page.context.close()

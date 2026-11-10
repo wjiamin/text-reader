@@ -226,6 +226,7 @@
         <p>Your iPhone stops a web page from talking when the screen locks, so this reader keeps the screen on while it reads.</p>
       </details>
       <p id="sync-note" class="sync">Your place is saved on this phone.</p>
+      <p class="sync">Fic Listener version 4</p>
     </section>
 
     <section id="reader-view" class="reader" hidden>
@@ -762,6 +763,10 @@ const NATURAL = Object.assign({
   model: "onnx-community/Kokoro-82M-v1.0-ONNX",
   // Inside a claude.ai page the voice model isn't allowed to download
   enabled: !window.claude?.use,
+  worker: true,
+  startMs: 15000,    // for the background worker to say it's running
+  stallMs: 120000,   // with no word from the voice while it loads
+  speakMs: 240000,   // for one part to be made
 }, window.FIC_LISTENER_CONFIG || {});
 const NATURAL_VOICES = {
   af_heart: "Heart · American", af_bella: "Bella · American", af_nicole: "Nicole · American, soft",
@@ -770,20 +775,36 @@ const NATURAL_VOICES = {
 };
 const isNatural = (value) => typeof value === "string" && value.startsWith("kokoro:");
 
-// Runs Kokoro off the main thread so the page stays responsive while it works
+// Loads Kokoro and reports each step, so a slow or stuck phone can say where it is.
+// It runs in a background worker (its source is built from this function), or
+// on the page itself when the worker can't start.
+async function loadKokoro(options, report) {
+  report({ type: "stage", stage: "library" });
+  const { KokoroTTS, env } = await import(options.library);
+  if (options.wasmPaths) env.wasmPaths = options.wasmPaths;
+  report({ type: "stage", stage: "model" });
+  const tts = await KokoroTTS.from_pretrained(options.model, {
+    dtype: options.dtype,
+    device: options.device,
+    progress_callback: (p) => report({ type: "download", file: p.file, loaded: p.loaded, total: p.total }),
+  });
+  report({ type: "stage", stage: "ready" });
+  return tts;
+}
+
 const WORKER_SOURCE = `
+${loadKokoro.toString()}
+self.postMessage({ type: "stage", stage: "started" });
+self.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  self.postMessage({ type: "failed", error: String((reason && reason.message) || reason) });
+});
 let tts = null;
 self.onmessage = async ({ data }) => {
   const reply = (body, transfer) => self.postMessage({ id: data.id, ...body }, transfer || []);
   try {
     if (data.type === "load") {
-      const { KokoroTTS, env } = await import(data.library);
-      if (data.wasmPaths) env.wasmPaths = data.wasmPaths;
-      tts = await KokoroTTS.from_pretrained(data.model, {
-        dtype: data.dtype,
-        device: data.device,
-        progress_callback: (p) => self.postMessage({ type: "download", file: p.file, loaded: p.loaded, total: p.total }),
-      });
+      tts = await loadKokoro(data, (message) => self.postMessage(message));
       reply({ ok: true });
     } else if (data.type === "speak") {
       const audio = await tts.generate(data.text, { voice: data.voice });
@@ -796,69 +817,176 @@ self.onmessage = async ({ data }) => {
 
 const natural = {
   worker: null,
+  tts: null,        // Kokoro running on the page, when the worker couldn't start
+  mode: "",         // "worker" or "page"
   loading: null,
   calls: new Map(),
   nextId: 1,
   downloads: new Map(),
+  downloadText: "",
+  stage: "",
+  lastHeard: 0,
   made: 0,   // seconds of audio made...
   took: 0,   // ...and how long that took, for the speed estimate
+
   load() {
     if (this.loading) return this.loading;
     if (NATURAL.make) return (this.loading = Promise.resolve());
-    const source = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
-    this.worker = new Worker(source, { type: "module" });
-    this.worker.onmessage = ({ data }) => {
-      if (data.type === "download") return this.downloading(data);
-      const call = this.calls.get(data.id);
-      if (!call) return;
-      this.calls.delete(data.id);
-      if (data.ok) call.resolve(data);
-      else call.reject(new Error(data.error));
-    };
-    this.worker.onerror = (event) => {
-      for (const call of this.calls.values()) call.reject(new Error(event.message || "The natural voice stopped."));
-      this.calls.clear();
-    };
     const device = settings.engine === "gpu" && "gpu" in navigator ? "webgpu" : "wasm";
-    this.loading = this.call({
-      type: "load", library: NATURAL.library, wasmPaths: NATURAL.wasmPaths, model: NATURAL.model,
+    const options = {
+      library: NATURAL.library, wasmPaths: NATURAL.wasmPaths, model: NATURAL.model,
       device, dtype: device === "webgpu" ? "fp32" : "q8",
-    }).catch((error) => {
+    };
+    this.stage = "starting";
+    this.lastHeard = Date.now();
+    this.loading = (async () => {
+      if (NATURAL.worker !== false && typeof Worker !== "undefined") {
+        try {
+          await this.startWorker(options);
+          this.mode = "worker";
+          return;
+        } catch (error) {
+          this.stopWorker();
+          // Only a worker that wouldn't run is worth retrying on the page itself;
+          // an error from the voice, or running out of memory, would just repeat
+          if (error.fromVoice || this.stage === "model" || this.stage === "ready") throw error;
+        }
+      }
+      this.stage = "starting";
+      this.lastHeard = Date.now();
+      this.tts = await this.watch(loadKokoro(options, (message) => this.heard(message)), NATURAL.stallMs);
+      this.mode = "page";
+    })().catch((error) => {
       this.reset();
-      throw new Error(`The natural voice couldn't load: ${error.message}`);
+      throw new Error(`The natural voice couldn't start on this phone: ${error.message}.`);
     });
     return this.loading;
   },
-  reset() {
+
+  startWorker(options) {
+    return new Promise((resolve, reject) => {
+      const source = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
+      try {
+        this.worker = new Worker(source, { type: "module" });
+      } catch (error) {
+        return reject(error);
+      }
+      const notStarted = setTimeout(() => reject(new Error("the background worker didn't start")), NATURAL.startMs);
+      this.worker.onmessage = ({ data }) => {
+        this.heard(data);
+        if (data.type === "stage" && data.stage === "started") {
+          clearTimeout(notStarted);
+          this.watch(this.call({ type: "load", ...options }), NATURAL.stallMs).then(resolve, reject);
+        } else if (data.type === "failed") {
+          this.failAll(new Error(data.error));
+        } else if (data.id && this.calls.has(data.id)) {
+          const call = this.calls.get(data.id);
+          this.calls.delete(data.id);
+          if (data.ok) call.resolve(data);
+          else call.reject(Object.assign(new Error(data.error), { fromVoice: true }));
+        }
+      };
+      this.worker.onerror = (event) => {
+        clearTimeout(notStarted);
+        const error = new Error(event.message || "the background worker stopped");
+        this.failAll(error);
+        reject(error);
+      };
+    });
+  },
+
+  stopWorker() {
     if (this.worker) this.worker.terminate();
     this.worker = null;
-    this.loading = null;
-    this.downloads.clear();
+    this.failAll(new Error("the natural voice was restarted"));
   },
+
+  reset() {
+    this.stopWorker();
+    this.tts = null;
+    this.mode = "";
+    this.loading = null;
+    this.stage = "";
+    this.downloads.clear();
+    this.downloadText = "";
+  },
+
   call(message) {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
       this.calls.set(id, { resolve, reject });
+      this.lastHeard = Date.now();
       this.worker.postMessage({ ...message, id });
     });
   },
+
+  failAll(error) {
+    for (const call of this.calls.values()) call.reject(error);
+    this.calls.clear();
+  },
+
+  // Gives up when nothing has been heard for `limit` ms of time on screen
+  watch(promise, limit) {
+    return new Promise((resolve, reject) => {
+      const timer = setInterval(() => {
+        if (!document.hidden && Date.now() - this.lastHeard > limit) {
+          clearInterval(timer);
+          reject(new Error("it stopped responding, so this phone may not have enough memory for it"));
+        }
+      }, 1000);
+      promise.then(
+        (value) => { clearInterval(timer); resolve(value); },
+        (error) => { clearInterval(timer); reject(error); },
+      );
+    });
+  },
+
+  heard(message) {
+    this.lastHeard = Date.now();
+    if (message.type === "stage") this.stage = message.stage;
+    if (message.type === "download") this.downloading(message);
+  },
+
   downloading({ file, loaded, total }) {
     if (!file || !total) return;
     this.downloads.set(file, { loaded, total });
     let have = 0, want = 0;
     for (const part of this.downloads.values()) { have += part.loaded; want += part.total; }
-    if (have < want) {
-      showNaturalStatus(`Downloading the natural voice, once: ${Math.round(have / 2 ** 20)} of ${Math.round(want / 2 ** 20)} MB`);
+    this.downloadText = have < want
+      ? `Downloading the natural voice, once: ${Math.round(have / 2 ** 20)} of ${Math.round(want / 2 ** 20)} MB`
+      : "";
+  },
+
+  // What it's doing right now, in words
+  describe() {
+    switch (this.stage) {
+      case "starting":
+      case "started": return "Starting the natural voice…";
+      case "library": return "Loading the voice program…";
+      case "model": return this.downloadText || "Setting up the voice (slow the first time)…";
+      default: return "Making the next part…";
     }
   },
+
   async make(text, voice) {
     await this.load();
+    this.stage = "making";
     const started = performance.now();
-    const result = NATURAL.make ? await NATURAL.make(text, voice) : await this.call({ type: "speak", text, voice });
+    let result;
+    if (NATURAL.make) {
+      result = await NATURAL.make(text, voice);
+    } else if (this.mode === "worker") {
+      result = await this.watch(this.call({ type: "speak", text, voice }), NATURAL.speakMs);
+    } else {
+      const audio = await this.tts.generate(text, { voice });
+      result = { pcm: audio.audio, rate: audio.sampling_rate };
+    }
+    this.lastHeard = Date.now();
     this.made += result.pcm.length / result.rate;
     this.took += (performance.now() - started) / 1000;
     return result;
   },
+
   // How many seconds of audio it makes per second of work, once there's enough to tell
   get speed() { return this.took >= 3 ? this.made / this.took : null; },
 };
@@ -1267,15 +1395,27 @@ async function playNatural(item, token) {
   const book = state.book;
   const c = state.position.c;
   const voice = settings.voice;
+  let ticker = null;
   if (!clips.times.has(clips.key(book, voice, c, item))) {
-    showNaturalStatus(natural.loading ? "Making the next part…" : "Getting the natural voice ready…");
+    // Say what it's doing, with a running count, so a slow phone doesn't look stuck
+    const since = Date.now();
+    const show = () => {
+      if (token === state.token) showNaturalStatus(`${natural.describe()} ${Math.round((Date.now() - since) / 1000)} s`);
+    };
+    show();
+    ticker = setInterval(show, 1000);
   }
   let row;
   try {
     row = await clips.load(book, voice, c, item);
   } catch (error) {
-    if (token === state.token) { pause(); showNaturalStatus(error.message); }
+    if (token === state.token) {
+      pause();
+      showNaturalStatus(`${error.message} To keep listening, pick a phone voice in Voice and settings.`);
+    }
     return;
+  } finally {
+    clearInterval(ticker);
   }
   if (token !== state.token || !state.playing) return;
   local.set("naturalReady", true);
@@ -1395,6 +1535,8 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     if (state.book) place.set(state.book, state.position, { flush: true });
   } else {
+    // Time spent in the background doesn't count against the voice
+    natural.lastHeard = Date.now();
     if (state.playing) holdScreen();
     // Coming back from Settings after downloading a voice
     if (state.book) { watchVoices(); prepareAhead(); }
