@@ -97,10 +97,24 @@ def browser():
         launched.close()
 
 
-@pytest.fixture
-def page(browser, site):
+# A stand-in for the natural voice: a little silence per word, and a record of what was made
+FAKE_NATURAL = """
+window.__made = [];
+window.FIC_LISTENER_CONFIG = {
+  make: async (text) => {
+    window.__made.push(text);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const words = text.split(/\\s+/).length;
+    return { pcm: new Float32Array(words * 1200), rate: 24000 };
+  },
+};
+"""
+
+
+def new_page(browser, site, *scripts):
     context = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
-    context.add_init_script(FAKE_SPEECH)
+    for script in scripts:
+        context.add_init_script(script)
     if os.environ.get("JSZIP_PATH"):
         context.route(JSZIP_URL, lambda route: route.fulfill(
             path=os.environ["JSZIP_PATH"], content_type="application/javascript"))
@@ -110,9 +124,24 @@ def page(browser, site):
     tab.on("pageerror", lambda error: errors.append(str(error)))
     tab.goto(site)
     tab.errors = errors
+    return tab
+
+
+@pytest.fixture
+def page(browser, site):
+    # The phone's own voices, as in a claude.ai page where the natural voice can't load
+    tab = new_page(browser, site, FAKE_SPEECH, "window.FIC_LISTENER_CONFIG = { enabled: false };")
     yield tab
-    assert errors == []
-    context.close()
+    assert tab.errors == []
+    tab.context.close()
+
+
+@pytest.fixture
+def natural_page(browser, site):
+    tab = new_page(browser, site, FAKE_SPEECH, FAKE_NATURAL)
+    yield tab
+    assert tab.errors == []
+    tab.context.close()
 
 
 def spoken(page):
@@ -260,3 +289,83 @@ def test_voices_that_arrive_late_are_picked_up(page, tmp_path):
     page.click("#list-voices")
     listed = page.inner_text("#all-voices")
     assert "Zarvox" in listed and "com.apple.voice.premium.en-US.Ava" in listed
+
+
+EXPECTED_STORY = [
+    "The Lighthouse Keeper's Apprentice.",
+    "By quietquill.",
+    "Summary.",
+    "A storm, a lamp that won't stay lit.",
+    "Chapter 1. The Storm.",
+    "The lamp went out at exactly the wrong moment.",
+    "“No,” Wren groaned. “Not again!”",
+    "By morning the sea had calmed.",
+    "The gulls were back.",
+    "Chapter 2.",
+    "Summary.",
+    "Wren climbs the stairs.",
+    "There were one hundred and twelve steps.",
+    "Wren counted every one of them.",
+]
+
+
+def test_natural_voice_reads_the_story_as_real_audio(natural_page, tmp_path):
+    page = natural_page
+    open_epub(page, multi_chapter(tmp_path / "work.epub"))
+    assert page.input_value("#voice") == "kokoro:af_heart"
+    page.click("#settings summary")
+    assert page.is_visible("#natural-settings")
+    assert page.is_hidden("#natural-elsewhere")
+
+    read_to_end(page)
+    assert page.evaluate("window.__made") == EXPECTED_STORY
+    assert spoken(page) == []  # nothing went to the phone's own voice
+    assert "listening speed" in page.inner_text("#natural-status")
+
+
+def test_prepared_audio_is_kept_and_reused(natural_page, tmp_path):
+    page = natural_page
+    open_epub(page, multi_chapter(tmp_path / "work.epub"))
+    page.click("#play")
+    page.wait_for_function("window.__made.length >= 8")
+    page.click("#play")  # pause
+    made = page.evaluate("window.__made.length")
+
+    page.reload()
+    page.wait_for_selector(".book")
+    page.click("[data-open]")
+    page.wait_for_selector("#reader-view:not([hidden])")
+    page.wait_for_function("document.querySelector('#natural-status').textContent.includes('ahead')")
+    page.evaluate("window.__made = []")
+    read_to_end(page)
+    # Only what wasn't prepared before the reload had to be made again
+    assert len(page.evaluate("window.__made")) <= len(EXPECTED_STORY) - made + 2
+    assert page.evaluate("window.__made")[-1] == EXPECTED_STORY[-1]
+
+
+def test_switching_to_a_phone_voice(natural_page, tmp_path):
+    page = natural_page
+    open_epub(page, one_shot(tmp_path / "tea.epub"))
+    page.click("#settings summary")
+    page.select_option("#voice", "com.apple.voice.premium.en-US.Ava")
+    assert page.is_hidden("#natural-settings")
+    read_to_end(page)
+    assert spoken(page)[0] == "Tea for Two."
+    assert page.evaluate("window.__made") == []
+
+
+def test_inside_claude_the_natural_voice_points_elsewhere(page, tmp_path):
+    open_epub(page, one_shot(tmp_path / "tea.epub"))
+    page.click("#settings summary")
+    values = page.eval_on_selector_all("#voice option", "els => els.map(e => e.value)")
+    assert not any(v.startswith("kokoro:") for v in values)
+    assert "wjiamin.github.io/text-reader" in page.inner_text("#natural-elsewhere")
+
+
+def test_github_pages_copy_is_up_to_date():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("build_pages", PAGE.parents[1] / "tools" / "build_pages.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    assert build.OUTPUT.read_text(encoding="utf-8") == build.render(), "run: python tools/build_pages.py"

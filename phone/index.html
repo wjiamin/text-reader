@@ -157,7 +157,9 @@
   .play svg { width: 30px; height: 30px; }
   .settings { margin-top: 4px; }
   .settings summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 6px 0; list-style-position: inside; }
-  .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; padding: 8px 0 4px; max-height: 50vh; overflow-y: auto; }
+  /* Scrolls inside the player so the play button always stays on screen */
+  .settings-body { max-height: 42vh; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 6px; }
+  .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; padding: 8px 0 4px; }
   .settings-grid label { display: grid; gap: 4px; font-size: 0.85rem; color: var(--muted); min-width: 0; }
   .settings-grid select { width: 100%; color: var(--ink); }
   .settings-grid .wide { grid-column: 1 / -1; }
@@ -166,6 +168,9 @@
   .check small { display: block; color: var(--muted); font-size: 0.8rem; }
   .notice { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; }
   .quiet.small { min-height: 36px; font-size: 0.85rem; margin-top: 8px; }
+  .natural-status { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .natural-settings { border-top: 1px solid var(--rule); margin-top: 6px; padding-top: 4px; }
+  .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
   .all-voices {
     margin: 8px 0 0; padding-left: 1.2em; color: var(--muted); font-size: 0.8rem;
     overflow-wrap: anywhere; user-select: text; -webkit-user-select: text;
@@ -222,6 +227,7 @@
 <div id="player" class="player" hidden>
   <div class="wrap">
     <div class="where"><span id="where"></span><span id="saved"></span></div>
+    <p id="natural-status" class="notice natural-status" role="status" hidden></p>
     <div class="controls">
       <button id="prev-chapter" class="icon" type="button" aria-label="Previous chapter">
         <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
@@ -241,6 +247,7 @@
     </div>
     <details class="settings" id="settings">
       <summary>Voice and settings</summary>
+      <div class="settings-body">
       <div class="settings-grid">
         <label class="wide">Voice<select id="voice"></select></label>
         <label>Speed
@@ -270,11 +277,35 @@
           <span>Try to keep reading with the screen locked<small>An experiment. It may not work on your phone.</small></span>
         </label>
       </div>
+      <div id="natural-settings" class="natural-settings" hidden>
+        <div class="settings-grid">
+          <label>Prepare ahead
+            <select id="ahead">
+              <option value="30">30 minutes</option>
+              <option value="60">1 hour</option>
+              <option value="120">2 hours</option>
+            </select>
+          </label>
+          <label>Make the voice with
+            <select id="engine">
+              <option value="cpu">Processor (110 MB, once)</option>
+              <option value="gpu">Graphics chip (330 MB, once)</option>
+            </select>
+          </label>
+        </div>
+        <p class="notice">The natural voice is made on this phone, so it downloads once and then works offline. Prepared parts play with the screen locked; making new ones needs this page open. If your phone makes audio slower than you listen, tap “Prepare ahead now” while it charges.</p>
+        <div class="button-row">
+          <button id="prepare-now" class="quiet small" type="button">Prepare ahead now</button>
+          <button id="clear-clips" class="quiet small" type="button">Delete prepared audio</button>
+        </div>
+      </div>
+      <p id="natural-elsewhere" class="notice" hidden>A much more natural voice runs in the GitHub version of Fic Listener, which can download it: <a href="https://wjiamin.github.io/text-reader/" target="_blank" rel="noopener">wjiamin.github.io/text-reader</a></p>
       <p id="voice-tip" class="notice" hidden>For a more natural voice, download an Enhanced or Premium voice in your iPhone's settings (see the tip on the stories page).</p>
       <p id="voice-count" class="notice"></p>
       <p class="notice">Downloaded a voice and don't see it? Close Safari completely (swipe it away in the app switcher), open it again, and come back here. Use Safari itself, not a page inside another app.</p>
       <button id="list-voices" class="quiet small" type="button">List every voice this phone offers</button>
       <ul id="all-voices" class="all-voices" hidden></ul>
+      </div>
     </details>
   </div>
 </div>
@@ -633,18 +664,25 @@ const shelfStore = {
   async open() {
     if (this.db) return this.db;
     this.db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open("fic-listener", 1);
-      request.onupgradeneeded = () => request.result.createObjectStore("books", { keyPath: "id" });
+      const request = indexedDB.open("fic-listener", 2);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains("books")) db.createObjectStore("books", { keyPath: "id" });
+        // Audio made by the natural voice, one row per spoken line
+        if (!db.objectStoreNames.contains("clips")) {
+          db.createObjectStore("clips", { keyPath: "key" }).createIndex("book", "book");
+        }
+      };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
     return this.db;
   },
-  async run(mode, action) {
+  async run(mode, action, name = "books") {
     try {
       const db = await this.open();
       return await new Promise((resolve, reject) => {
-        const store = db.transaction("books", mode).objectStore("books");
+        const store = db.transaction(name, mode).objectStore(name);
         const request = action(store);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -656,7 +694,288 @@ const shelfStore = {
   all() { return this.run("readonly", (store) => store.getAll()); },
   put(book) { return this.run("readwrite", (store) => store.put(book)); },
   remove(id) { return this.run("readwrite", (store) => store.delete(id)); },
+  clip(key) { return this.run("readonly", (store) => store.get(key), "clips"); },
+  async putClip(row) {
+    const db = await this.open();
+    await new Promise((resolve, reject) => {
+      const request = db.transaction("clips", "readwrite").objectStore("clips").put(row);
+      request.onsuccess = resolve;
+      request.onerror = () => reject(request.error);
+    });
+  },
+  // [key, seconds] for every prepared line of a story
+  async clipTimes(bookId) {
+    const rows = [];
+    try {
+      const db = await this.open();
+      await new Promise((resolve, reject) => {
+        const request = db.transaction("clips").objectStore("clips").index("book").openCursor(IDBKeyRange.only(bookId));
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) return resolve();
+          rows.push([cursor.value.key, cursor.value.seconds]);
+          cursor.continue();
+        };
+        request.onerror = () => reject(request.error);
+      });
+    } catch { /* storage blocked */ }
+    return rows;
+  },
+  // Delete a story's prepared audio, or only chapters before `beforeChapter`
+  async dropClips(bookId, beforeChapter = Infinity) {
+    try {
+      const db = await this.open();
+      await new Promise((resolve, reject) => {
+        const request = db.transaction("clips", "readwrite").objectStore("clips").index("book").openCursor(IDBKeyRange.only(bookId));
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) return resolve();
+          if (cursor.value.c < beforeChapter) cursor.delete();
+          cursor.continue();
+        };
+        request.onerror = () => reject(request.error);
+      });
+    } catch { /* storage blocked */ }
+  },
 };
+
+// ---------- The natural voice: Kokoro, made on this phone ----------
+
+const NATURAL = Object.assign({
+  library: "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js",
+  wasmPaths: null,
+  model: "onnx-community/Kokoro-82M-v1.0-ONNX",
+  // Inside a claude.ai page the voice model isn't allowed to download
+  enabled: !window.claude?.use,
+}, window.FIC_LISTENER_CONFIG || {});
+const NATURAL_VOICES = {
+  af_heart: "Heart · American", af_bella: "Bella · American", af_nicole: "Nicole · American, soft",
+  am_michael: "Michael · American", am_fenrir: "Fenrir · American",
+  bf_emma: "Emma · British", bm_george: "George · British", bm_fable: "Fable · British",
+};
+const isNatural = (value) => typeof value === "string" && value.startsWith("kokoro:");
+
+// Runs Kokoro off the main thread so the page stays responsive while it works
+const WORKER_SOURCE = `
+let tts = null;
+self.onmessage = async ({ data }) => {
+  const reply = (body, transfer) => self.postMessage({ id: data.id, ...body }, transfer || []);
+  try {
+    if (data.type === "load") {
+      const { KokoroTTS, env } = await import(data.library);
+      if (data.wasmPaths) env.wasmPaths = data.wasmPaths;
+      tts = await KokoroTTS.from_pretrained(data.model, {
+        dtype: data.dtype,
+        device: data.device,
+        progress_callback: (p) => self.postMessage({ type: "download", file: p.file, loaded: p.loaded, total: p.total }),
+      });
+      reply({ ok: true });
+    } else if (data.type === "speak") {
+      const audio = await tts.generate(data.text, { voice: data.voice });
+      reply({ ok: true, pcm: audio.audio, rate: audio.sampling_rate }, [audio.audio.buffer]);
+    }
+  } catch (error) {
+    reply({ ok: false, error: String((error && error.message) || error) });
+  }
+};`;
+
+const natural = {
+  worker: null,
+  loading: null,
+  calls: new Map(),
+  nextId: 1,
+  downloads: new Map(),
+  made: 0,   // seconds of audio made...
+  took: 0,   // ...and how long that took, for the speed estimate
+  load() {
+    if (this.loading) return this.loading;
+    if (NATURAL.make) return (this.loading = Promise.resolve());
+    const source = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
+    this.worker = new Worker(source, { type: "module" });
+    this.worker.onmessage = ({ data }) => {
+      if (data.type === "download") return this.downloading(data);
+      const call = this.calls.get(data.id);
+      if (!call) return;
+      this.calls.delete(data.id);
+      if (data.ok) call.resolve(data);
+      else call.reject(new Error(data.error));
+    };
+    this.worker.onerror = (event) => {
+      for (const call of this.calls.values()) call.reject(new Error(event.message || "The natural voice stopped."));
+      this.calls.clear();
+    };
+    const device = settings.engine === "gpu" && "gpu" in navigator ? "webgpu" : "wasm";
+    this.loading = this.call({
+      type: "load", library: NATURAL.library, wasmPaths: NATURAL.wasmPaths, model: NATURAL.model,
+      device, dtype: device === "webgpu" ? "fp32" : "q8",
+    }).catch((error) => {
+      this.reset();
+      throw new Error(`The natural voice couldn't load: ${error.message}`);
+    });
+    return this.loading;
+  },
+  reset() {
+    if (this.worker) this.worker.terminate();
+    this.worker = null;
+    this.loading = null;
+    this.downloads.clear();
+  },
+  call(message) {
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      this.calls.set(id, { resolve, reject });
+      this.worker.postMessage({ ...message, id });
+    });
+  },
+  downloading({ file, loaded, total }) {
+    if (!file || !total) return;
+    this.downloads.set(file, { loaded, total });
+    let have = 0, want = 0;
+    for (const part of this.downloads.values()) { have += part.loaded; want += part.total; }
+    if (have < want) {
+      showNaturalStatus(`Downloading the natural voice, once: ${Math.round(have / 2 ** 20)} of ${Math.round(want / 2 ** 20)} MB`);
+    }
+  },
+  async make(text, voice) {
+    await this.load();
+    const started = performance.now();
+    const result = NATURAL.make ? await NATURAL.make(text, voice) : await this.call({ type: "speak", text, voice });
+    this.made += result.pcm.length / result.rate;
+    this.took += (performance.now() - started) / 1000;
+    return result;
+  },
+  // How many seconds of audio it makes per second of work, once there's enough to tell
+  get speed() { return this.took >= 3 ? this.made / this.took : null; },
+};
+
+// Prepared lines: made once, kept on the phone, played from there
+const clips = {
+  times: new Map(),     // key -> seconds, for the open story
+  inflight: new Map(),  // key -> promise of a row being made
+  key(book, voice, c, item) { return [voice, book.id, c, item.text].join("\u0000"); },
+  async index(book) {
+    this.times = new Map(await shelfStore.clipTimes(book.id));
+  },
+  async load(book, voice, c, item) {
+    const key = this.key(book, voice, c, item);
+    if (this.inflight.has(key)) return this.inflight.get(key);
+    const row = this.times.has(key) ? await shelfStore.clip(key) : null;
+    return row || this.make(book, voice, c, item, key);
+  },
+  make(book, voice, c, item, key) {
+    if (!this.inflight.has(key)) {
+      const work = (async () => {
+        const { pcm, rate } = await natural.make(item.text, voice.slice("kokoro:".length));
+        const pause = Math.round((rate * item.pause) / 1000);
+        const row = { key, book: book.id, c, seconds: (pcm.length + pause) / rate, blob: wavBlob(pcm, rate, pause) };
+        try {
+          await shelfStore.putClip(row);
+          this.times.set(key, row.seconds);
+        } catch {
+          showNaturalStatus("This phone's storage for Fic Listener is full. Delete prepared audio in Voice and settings.");
+        }
+        return row;
+      })().finally(() => this.inflight.delete(key));
+      this.inflight.set(key, work);
+    }
+    return this.inflight.get(key);
+  },
+};
+
+function wavBlob(pcm, rate, silence = 0) {
+  const samples = pcm.length + silence;
+  const buffer = new ArrayBuffer(44 + samples * 2);
+  const view = new DataView(buffer);
+  const text = (offset, value) => [...value].forEach((ch, i) => view.setUint8(offset + i, ch.charCodeAt(0)));
+  text(0, "RIFF"); view.setUint32(4, 36 + samples * 2, true); text(8, "WAVE");
+  text(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  text(36, "data"); view.setUint32(40, samples * 2, true);
+  for (let i = 0; i < pcm.length; i++) {
+    view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+  }
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+// The upcoming lines, from the current place onward, with how much is already prepared
+function* upcoming() {
+  const book = state.book;
+  for (let c = state.position.c; c < book.chapters.length; c++) {
+    for (const item of readingQueue(book.chapters[c], settings)) {
+      if (c === state.position.c && item.b < state.position.b) continue;
+      yield { c, item, key: clips.key(book, settings.voice, c, item) };
+    }
+  }
+}
+
+function preparedAhead() {
+  let seconds = 0;
+  for (const { key } of upcoming()) {
+    if (!clips.times.has(key)) break;
+    seconds += clips.times.get(key);
+  }
+  return seconds;
+}
+
+const preparing = { running: false, manual: false };
+async function prepareAhead() {
+  if (preparing.running || !state.book || !isNatural(settings.voice)) return;
+  if (!state.playing && !preparing.manual && !local.get("naturalReady", false)) return;
+  preparing.running = true;
+  try {
+    const limit = Number(settings.ahead) * 60;
+    while (state.book && isNatural(settings.voice) && !document.hidden) {
+      let ahead = 0;
+      let next = null;
+      for (const line of upcoming()) {
+        if (!clips.times.has(line.key)) { next = line; break; }
+        ahead += clips.times.get(line.key);
+        if (ahead >= limit) break;
+      }
+      if (!next) break;
+      await clips.make(state.book, settings.voice, next.c, next.item, next.key);
+      local.set("naturalReady", true);
+      updateNaturalStatus();
+    }
+  } catch (error) {
+    showNaturalStatus(error.message);
+  } finally {
+    preparing.running = false;
+    if (preparing.manual) {
+      preparing.manual = false;
+      if (!state.playing) releaseScreen();
+    }
+    updateNaturalStatus();
+  }
+}
+
+let naturalNotice = "";
+function showNaturalStatus(text) {
+  naturalNotice = text;
+  const el = $("#natural-status");
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+function updateNaturalStatus() {
+  const on = Boolean(state.book) && isNatural(settings.voice);
+  if (!on) return showNaturalStatus("");
+  const parts = [];
+  const ahead = preparedAhead();
+  if (ahead > 0 || preparing.running) parts.push(`Ready ${formatMinutes(ahead)} ahead`);
+  const speed = natural.speed;
+  if (speed) {
+    parts.push(`your phone makes audio at ${speed.toFixed(1)}× listening speed`);
+  }
+  if (preparing.running && !parts.length) parts.push("Making the natural voice…");
+  showNaturalStatus(parts.join(" · "));
+}
+
+function formatMinutes(seconds) {
+  if (seconds < 60) return `${Math.round(seconds)} sec`;
+  const minutes = Math.round(seconds / 60);
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`;
+}
 
 // ---------- Your place: on this phone, and in your Claude account when available ----------
 
@@ -733,14 +1052,31 @@ function loadVoices() {
     .filter((v) => voiceRank(v) < 9 || pool.every((other) => voiceRank(other) === 9))
     .sort((a, b) => voiceRank(a) - voiceRank(b) || a.name.localeCompare(b.name));
   const select = $("#voice");
-  const chosen = settings.voice;
-  select.replaceChildren(new Option("Phone's default voice", ""));
+  // The saved choice, not the stand-in used while the phone was still listing voices
+  const chosen = local.get("settings", {}).voice ?? null;
+  const groups = [];
+  if (NATURAL.enabled && lang === "en") {
+    const group = document.createElement("optgroup");
+    group.label = "Natural voices (made on this phone)";
+    for (const [id, label] of Object.entries(NATURAL_VOICES)) group.append(new Option(label, `kokoro:${id}`));
+    groups.push(group);
+  }
+  const phone = document.createElement("optgroup");
+  phone.label = "Phone voices";
+  phone.append(new Option("Phone's default voice", ""));
   for (const voice of voices) {
     const quality = voiceRank(voice) === 0 ? " · Premium" : voiceRank(voice) === 1 ? " · Enhanced" : "";
-    select.add(new Option(`${voice.name.replace(/\s*\((Premium|Enhanced)\)/i, "")} (${voice.lang})${quality}`, voice.voiceURI));
+    phone.append(new Option(`${voice.name.replace(/\s*\((Premium|Enhanced)\)/i, "")} (${voice.lang})${quality}`, voice.voiceURI));
   }
+  groups.push(phone);
+  select.replaceChildren(...groups);
   const best = voices.find((v) => voiceRank(v) <= 1);
-  select.value = voices.some((v) => v.voiceURI === chosen) ? chosen : best ? best.voiceURI : "";
+  const offered = [...select.options].map((option) => option.value);
+  select.value = offered.includes(chosen) ? chosen
+    : groups.length > 1 ? "kokoro:af_heart"
+    : best ? best.voiceURI : "";
+  settings.voice = select.value;
+  showVoiceSettings();
   $("#voice-tip").hidden = Boolean(best);
   $("#voice-count").textContent = all.length
     ? `This browser offers ${voices.length} voice${voices.length === 1 ? "" : "s"} for this story's language.`
@@ -774,6 +1110,12 @@ function listAllVoices() {
   list.hidden = false;
 }
 
+function showVoiceSettings() {
+  $("#natural-settings").hidden = !isNatural(settings.voice);
+  $("#natural-elsewhere").hidden = NATURAL.enabled;
+  updateNaturalStatus();
+}
+
 function currentVoice() {
   return voices.find((v) => v.voiceURI === $("#voice").value) || null;
 }
@@ -781,12 +1123,12 @@ function currentVoice() {
 // ---------- Settings ----------
 
 const settings = Object.assign(
-  { voice: "", rate: "1", summary: true, notes: false, follow: true, awake: true, locked: false },
+  { voice: null, rate: "1", summary: true, notes: false, follow: true, awake: true, locked: false, ahead: "60", engine: "cpu" },
   local.get("settings", {}),
 );
 const settingInputs = {
   voice: "#voice", rate: "#rate", summary: "#opt-summary", notes: "#opt-notes",
-  follow: "#opt-follow", awake: "#opt-awake", locked: "#opt-locked",
+  follow: "#opt-follow", awake: "#opt-awake", locked: "#opt-locked", ahead: "#ahead", engine: "#engine",
 };
 for (const [key, selector] of Object.entries(settingInputs)) {
   const input = $(selector);
@@ -796,7 +1138,11 @@ for (const [key, selector] of Object.entries(settingInputs)) {
     settings[key] = input.type === "checkbox" ? input.checked : input.value;
     local.set("settings", settings);
     if (key === "summary" || key === "notes") { renderChapter(); if (state.playing) restartAt(state.position); }
-    if ((key === "voice" || key === "rate") && state.playing) restartAt(state.position);
+    if (key === "rate") player.playbackRate = Number(settings.rate) || 1;
+    if (key === "voice") { showVoiceSettings(); if (state.playing) restartAt(state.position); prepareAhead(); }
+    if (key === "rate" && state.playing && !isNatural(settings.voice)) restartAt(state.position);
+    if (key === "engine") natural.reset();
+    if (key === "ahead") prepareAhead();
     if (key === "awake") state.playing && settings.awake ? holdScreen() : releaseScreen();
     if (key === "locked") state.playing && settings.locked ? keepAlive.start() : keepAlive.stop();
   });
@@ -818,13 +1164,29 @@ const state = {
   userScrolledAt: 0,
 };
 
+// Plays the natural voice's audio; a real audio file keeps going with the screen locked
+const player = new Audio();
+player.preload = "auto";
+
+// iPhones only let a page start audio right after a tap. Playing a moment of
+// silence during the tap lets later parts start on their own, even when the
+// first part takes a while to make.
+let silence = null;
+function unlockPlayer() {
+  if (player.src) return;
+  silence = silence || silentWav(0.1);
+  player.src = silence;
+  player.play().catch(() => {});
+}
+
 function play() {
-  if (!synth) return showReaderNotice("This browser can't read aloud.");
+  if (!isNatural(settings.voice) && !synth) return showReaderNotice("This browser can't read aloud.");
   if (!state.book) return;
   state.playing = true;
   setPlayButton();
+  if (isNatural(settings.voice)) unlockPlayer();
   if (settings.awake) holdScreen();
-  if (settings.locked) keepAlive.start();
+  if (settings.locked && !isNatural(settings.voice)) keepAlive.start();
   const minutes = Number($("#sleep").value);
   state.sleepAt = minutes ? Date.now() + minutes * 60000 : null;
   updateMediaSession();
@@ -837,7 +1199,8 @@ function pause({ save = true } = {}) {
   clearTimeout(state.gap);
   state.gap = null;
   if (synth) synth.cancel();
-  releaseScreen();
+  player.pause();
+  if (!preparing.manual) releaseScreen();
   keepAlive.stop();
   setPlayButton();
   if (save && state.book) place.set(state.book, state.position, { flush: true });
@@ -847,6 +1210,7 @@ function restartAt(position) {
   state.token++;
   clearTimeout(state.gap);
   if (synth && (synth.speaking || synth.pending)) synth.cancel();
+  player.pause();
   state.queue = readingQueue(state.book.chapters[position.c], settings);
   state.index = state.queue.findIndex((item) => item.b >= position.b);
   if (state.index < 0) state.index = state.queue.length;
@@ -861,6 +1225,7 @@ function speakNext() {
   const item = state.queue[state.index];
   const token = ++state.token;
   moveTo({ c: state.position.c, b: item.b });
+  if (isNatural(settings.voice)) return playNatural(item, token);
 
   const utterance = new SpeechSynthesisUtterance(item.text);
   const voice = currentVoice();
@@ -883,6 +1248,44 @@ function speakNext() {
   synth.speak(utterance);
 }
 
+async function playNatural(item, token) {
+  const book = state.book;
+  const c = state.position.c;
+  const voice = settings.voice;
+  if (!clips.times.has(clips.key(book, voice, c, item))) {
+    showNaturalStatus(natural.loading ? "Making the next part…" : "Getting the natural voice ready…");
+  }
+  let row;
+  try {
+    row = await clips.load(book, voice, c, item);
+  } catch (error) {
+    if (token === state.token) { pause(); showNaturalStatus(error.message); }
+    return;
+  }
+  if (token !== state.token || !state.playing) return;
+  local.set("naturalReady", true);
+  const url = URL.createObjectURL(row.blob);
+  const next = () => {
+    URL.revokeObjectURL(url);
+    if (token !== state.token || !state.playing) return;
+    state.index++;
+    speakNext();
+  };
+  player.onended = next;
+  player.onerror = next;
+  player.src = url;
+  player.playbackRate = Number(settings.rate) || 1;
+  player.preservesPitch = true;
+  try {
+    await player.play();
+  } catch {
+    if (token === state.token) { pause(); showReaderNotice("Press play to carry on."); }
+    return;
+  }
+  updateNaturalStatus();
+  prepareAhead();
+}
+
 function chapterFinished() {
   if ($("#sleep").value === "chapter") {
     $("#sleep").value = "off";
@@ -901,12 +1304,13 @@ function chapterFinished() {
 
 // Watch for speech that silently stopped, the sleep timer, and slow voices
 setInterval(() => {
-  if (!state.playing || !synth) return;
+  if (!state.playing) return;
   if (state.sleepAt && Date.now() >= state.sleepAt) {
     $("#sleep").value = "off";
     pause();
     return showReaderNotice("Stopped by the sleep timer.");
   }
+  if (isNatural(settings.voice) || !synth) return;
   const idle = !synth.speaking && !synth.pending && state.gap === null;
   if (idle && Date.now() - state.startedAt > 4000) speakNext();
   // Chrome's online voices go quiet after about 15 seconds unless nudged
@@ -978,7 +1382,7 @@ document.addEventListener("visibilitychange", () => {
   } else {
     if (state.playing) holdScreen();
     // Coming back from Settings after downloading a voice
-    if (state.book) watchVoices();
+    if (state.book) { watchVoices(); prepareAhead(); }
   }
 });
 
@@ -1046,6 +1450,8 @@ function openBook(book) {
   watchVoices();
   openChapter(c, saved ? saved.b : 0);
   scrollToCurrent(true);
+  clips.times = new Map();
+  clips.index(book).then(() => { updateNaturalStatus(); prepareAhead(); });
 }
 
 function closeBook() {
@@ -1062,6 +1468,8 @@ function closeBook() {
 
 function openChapter(c, b) {
   state.position = { c, b };
+  const book = state.book;
+  if (c > 1) shelfStore.dropClips(book.id, c - 1).then(() => { if (state.book === book) clips.index(book); });
   $("#chapter").value = String(c);
   renderChapter();
   window.scrollTo(0, 0);
@@ -1241,6 +1649,7 @@ $("#shelf").addEventListener("click", async (event) => {
   }
   const id = remove.dataset.remove;
   await shelfStore.remove(id);
+  await shelfStore.dropClips(id);
   place.forget(id);
   state.books = state.books.filter((b) => b.id !== id);
   renderShelf();
@@ -1283,6 +1692,18 @@ if (synth) {
   synth.addEventListener?.("voiceschanged", () => { if (state.book) loadVoices(); });
 }
 $("#list-voices").addEventListener("click", listAllVoices);
+$("#prepare-now").addEventListener("click", () => {
+  preparing.manual = true;
+  holdScreen();
+  showNaturalStatus("Preparing… keep this page open.");
+  prepareAhead();
+});
+$("#clear-clips").addEventListener("click", async () => {
+  if (!state.book) return;
+  await shelfStore.dropClips(state.book.id);
+  clips.times = new Map();
+  updateNaturalStatus();
+});
 $("#settings").addEventListener("toggle", () => { if ($("#settings").open && state.book) watchVoices(); });
 
 function sampleStory() {

@@ -72,20 +72,35 @@ automatically. For example: `ao3-reader web --port 8080`.
 
 ## Fic Listener: reading on your phone, no computer
 
-`phone/index.html` is a page that runs entirely on your phone. Download a work
-from AO3 with **Download → EPUB**, save it to Files, and open it in the page.
-It cleans the text up the same way, reads it with your phone's own voices,
-and remembers your place down to the paragraph. Tap any paragraph to read from
-there. Stories stay on the phone.
+**https://wjiamin.github.io/text-reader/** is a page that runs entirely on
+your phone. Download a work from AO3 with **Download → EPUB**, save it to
+Files, and open it in the page. It cleans the text up the same way, reads it
+aloud, and remembers your place down to the paragraph. Tap any paragraph to
+read from there. Stories stay on the phone. Add it to your Home Screen
+(Share → Add to Home Screen) so the phone keeps its saved stories and voice.
 
-For the most natural sound on an iPhone, download an *Enhanced* or *Premium*
-voice in Settings → Accessibility → Spoken Content → Voices, then pick it
-under "Voice and settings".
+**The natural voice** is Kokoro, the same voice the computer version uses,
+made on the phone itself. It downloads about 110 MB once and then works
+offline. The page shows how fast your phone makes it:
 
-The catch: iPhones stop web pages from talking when the screen locks, so it
-keeps the screen on while it reads. There's an experimental setting that tries
-to keep going with the screen locked; whether it works depends on the phone.
-To listen with the phone in your pocket, use the audiobook made on a computer.
+- Faster than you listen ("1.5× listening speed"): just press play.
+- Slower than you listen: tap **Prepare ahead now** in "Voice and settings"
+  while the phone charges, and leave the page open. Prepared parts play
+  later with the screen locked.
+
+"Make the voice with: Graphics chip" may be much faster on recent phones, at
+the cost of a bigger one-time download (330 MB).
+
+The phone's own voices are also offered. Safari only lets web pages use the
+basic ones, so they sound robotic, and they stop when the screen locks.
+
+A copy also runs as a private claude.ai page, which saves your place to your
+Claude account, but claude.ai pages can't download the natural voice.
+
+The page is `phone/index.html`; `docs/index.html` is the GitHub Pages copy,
+made with `python tools/build_pages.py`. To publish it, turn on GitHub Pages
+in the repository's Settings → Pages: deploy from the `main` branch, `/docs`
+folder.
 
 ## Making an audiobook from the command line
 
