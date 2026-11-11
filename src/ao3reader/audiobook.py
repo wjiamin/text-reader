@@ -47,12 +47,16 @@ def make_audiobook(
     name_suffix: str = "",
     store: Path | None = None,
     stream: TextIO = sys.stderr,
+    live: bool | None = None,
 ) -> Path:
-    """Speak every track and write the finished audiobook; returns its path."""
+    """Speak every track and write the finished audiobook; returns its path.
+
+    `live` shows a running percentage for each chapter; by default only on a terminal.
+    """
     if fmt not in FORMATS:
         raise ValueError(f"Format must be one of: {', '.join(FORMATS)}")
     store = store or cache_dir() / "audio"
-    status = _Status(stream)
+    status = _Status(stream, live)
     rendered = []
     for number, track in enumerate(tracks, 1):
         label = f"[{number:>{len(str(len(tracks)))}}/{len(tracks)}] {track.title}"
@@ -254,9 +258,9 @@ def format_duration(seconds: float) -> str:
 class _Status:
     """One line per finished chapter, with a live percentage on a terminal."""
 
-    def __init__(self, stream: TextIO):
+    def __init__(self, stream: TextIO, live: bool | None = None):
         self.stream = stream
-        self.live = stream.isatty()
+        self.live = stream.isatty() if live is None else live
         self.width = 0
 
     def update(self, text: str) -> None:

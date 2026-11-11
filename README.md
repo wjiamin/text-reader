@@ -102,6 +102,22 @@ with `python tools/build_pages.py`. The site is published from the `gh-pages`
 branch, which holds that copy as its `index.html`: after changing the page,
 rebuild it and copy `docs/index.html` there.
 
+## The natural voice for long fics, with no computer: Google Colab
+
+Phones are slow at making the natural voice (an iPhone tested here managed
+0.1× listening speed) and can run out of memory doing it. Google Colab lends
+a free computer with a graphics chip that makes it far faster, so it can turn
+a whole fic into an audiobook in one go.
+
+1. Open **[the audiobook maker](https://colab.research.google.com/github/wjiamin/text-reader/blob/main/colab/make_audiobook.ipynb)**
+   and sign in with a Google account.
+2. Tap ▶ on each step in turn: get ready, choose the EPUB you downloaded
+   from AO3, make the audiobook, download it.
+3. Open the downloaded `.m4b` in BookPlayer or Apple Books.
+
+The audiobook is about 22 MB per hour of listening. For very long fics,
+the last step can save it to Google Drive instead.
+
 ## Making an audiobook from the command line
 
 If you'd rather not use the web page:

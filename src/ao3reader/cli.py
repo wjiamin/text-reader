@@ -7,6 +7,7 @@ from pathlib import Path
 from . import __version__
 from .audiobook import FORMATS, format_duration, make_audiobook, speak_to_wav
 from .clean import Pronunciations
+from .epub import parse_epub
 from .fetch import FetchError, fetch_work, parse_work_id
 from .parse import ParseError, Work, parse_work
 from .script import (
@@ -104,7 +105,9 @@ def _sample(args: argparse.Namespace) -> None:
 
 def _load(ref: str, voice: str | None = None) -> Work:
     path = Path(ref).expanduser()
-    if path.is_file():
+    if path.is_file() and path.suffix.lower() == ".epub":
+        work = parse_epub(path)
+    elif path.is_file():
         work = parse_work(path.read_text(encoding="utf-8", errors="replace"))
     else:
         work_id = parse_work_id(ref)
@@ -158,7 +161,7 @@ def _parser() -> argparse.ArgumentParser:
     web.set_defaults(run=_web)
 
     reading = argparse.ArgumentParser(add_help=False)
-    reading.add_argument("work", help="an AO3 link or work ID, or a saved AO3 work page (.html)")
+    reading.add_argument("work", help="an AO3 link or work ID, an EPUB downloaded from AO3, or a saved work page")
     reading.add_argument("--chapters", metavar="LIST", help="only these chapters, such as 1-3,5 or 8-")
     reading.add_argument(
         "--no-summary", dest="summary", action="store_false", help="skip the work and chapter summaries"

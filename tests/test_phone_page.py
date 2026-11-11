@@ -500,3 +500,39 @@ def test_prepared_parts_play_as_one_continuous_file(browser, site, tmp_path):
     assert page.evaluate("window.__files") <= 3
     assert page.errors == []
     page.context.close()
+
+
+def test_after_a_crash_it_switches_back_to_the_phone_voice(browser, site, tmp_path):
+    # The page last closed while the natural voice was running: it crashed
+    crashed = "if (!sessionStorage.getItem('seen')) { sessionStorage.setItem('seen', '1'); localStorage.setItem('naturalRunning', '1'); localStorage.setItem('settings', JSON.stringify({ voice: 'kokoro:af_heart' })); }"
+    page = new_page(browser, site, crashed, FAKE_SPEECH, FAKE_NATURAL)
+    page.wait_for_selector("#crash-note:not([hidden])")
+    assert "audiobook maker" in page.inner_text("#crash-note")
+    page.click("#crash-ok")
+    assert page.is_hidden("#crash-note")
+
+    open_epub(page, one_shot(tmp_path / "tea.epub"))
+    assert not page.input_value("#voice").startswith("kokoro:")
+    page.reload()
+    page.wait_for_selector(".book")
+    assert page.is_hidden("#crash-note")  # only once
+    page.context.close()
+
+
+def test_iphones_start_with_the_phone_voice(browser, site, tmp_path):
+    context = browser.new_context(
+        viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True,
+        user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+    )
+    context.add_init_script(FAKE_SPEECH)
+    context.add_init_script(FAKE_NATURAL)
+    if os.environ.get("JSZIP_PATH"):
+        context.route(JSZIP_URL, lambda route: route.fulfill(path=os.environ["JSZIP_PATH"], content_type="application/javascript"))
+    page = context.new_page()
+    page.goto(site)
+    open_epub(page, one_shot(tmp_path / "tea.epub"))
+    assert page.input_value("#voice") == "com.apple.voice.premium.en-US.Ava"
+    page.click("#settings summary")
+    page.select_option("#voice", "kokoro:af_heart")
+    assert page.is_visible("#natural-iphone")
+    context.close()

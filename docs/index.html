@@ -184,6 +184,8 @@
   .notice { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; }
   .quiet.small { min-height: 36px; font-size: 0.85rem; margin-top: 8px; }
   .natural-status { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .crash-note { border-color: var(--danger); }
+  .crash-note .hint a, .notice a { color: var(--accent); }
   .offline-card {
     display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 14px;
     border-radius: 12px; background: var(--surface); border: 1px solid var(--rule);
@@ -225,6 +227,13 @@
         <p id="open-error" class="error" role="alert" hidden></p>
       </div>
 
+      <div id="crash-note" class="open-card crash-note" role="alert" hidden>
+        <strong>The natural voice was too much for this phone</strong>
+        <p class="hint">It needed more memory than Safari gives a web page, so the page crashed. Fic Listener has switched back to your phone's own voice.</p>
+        <p class="hint">For the natural voice, a free Google computer can make the whole story into an audiobook for you to download: <a href="https://colab.research.google.com/github/wjiamin/text-reader/blob/main/colab/make_audiobook.ipynb" target="_blank" rel="noopener">open the audiobook maker</a>.</p>
+        <button id="crash-ok" class="quiet small" type="button">OK</button>
+      </div>
+
       <h2 class="shelf-head">Your stories</h2>
       <ul id="shelf" class="shelf"></ul>
       <div id="empty" class="empty" hidden>
@@ -238,7 +247,7 @@
         <p>Your iPhone stops a web page from talking when the screen locks, so this reader keeps the screen on while it reads.</p>
       </details>
       <p id="sync-note" class="sync">Your place is saved on this phone.</p>
-      <p class="sync">Fic Listener version 7</p>
+      <p class="sync">Fic Listener version 8</p>
     </section>
 
     <section id="reader-view" class="reader" hidden>
@@ -337,6 +346,7 @@
             </select>
           </label>
         </div>
+        <p id="natural-iphone" class="notice" hidden>On many iPhones the natural voice is too slow, or needs more memory than Safari allows. For long fics, <a href="https://colab.research.google.com/github/wjiamin/text-reader/blob/main/colab/make_audiobook.ipynb" target="_blank" rel="noopener">make an audiobook on a free Google computer</a> instead.</p>
         <p class="notice">The natural voice is made on this phone, so it downloads once and then works offline. Prepared parts play with the screen locked; making new ones needs this page open. If your phone makes audio slower than you listen, prepare the rest of the story while it charges.</p>
         <div class="button-row">
           <button id="prepare-now" class="quiet small" type="button">Prepare the rest of the story</button>
@@ -822,6 +832,11 @@ const NATURAL_VOICES = {
   bf_emma: "Emma · British", bm_george: "George · British", bm_fable: "Fable · British",
 };
 const isNatural = (value) => typeof value === "string" && value.startsWith("kokoro:");
+const onIPhone = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+// Set while the natural voice is loaded and the page is on screen. Still set
+// when the page next opens means the page crashed while the voice was running.
+const CRASH_KEY = "naturalRunning";
 
 // Loads Kokoro and reports each step, so a slow or stuck phone can say where it is.
 // It runs in a background worker (its source is built from this function), or
@@ -904,6 +919,7 @@ const natural = {
     };
     this.stage = "starting";
     this.lastHeard = Date.now();
+    local.set(CRASH_KEY, Date.now());
     this.loading = (async () => {
       if (NATURAL.worker !== false && typeof Worker !== "undefined") {
         try {
@@ -1396,7 +1412,7 @@ function loadVoices() {
   const best = voices.find((v) => voiceRank(v) <= 1);
   const offered = [...select.options].map((option) => option.value);
   select.value = offered.includes(chosen) ? chosen
-    : groups.length > 1 ? "kokoro:af_heart"
+    : groups.length > 1 && !onIPhone ? "kokoro:af_heart"
     : best ? best.voiceURI : "";
   settings.voice = select.value;
   showVoiceSettings();
@@ -1436,6 +1452,7 @@ function listAllVoices() {
 function showVoiceSettings() {
   $("#natural-settings").hidden = !isNatural(settings.voice);
   $("#natural-elsewhere").hidden = NATURAL.enabled;
+  $("#natural-iphone").hidden = !onIPhone;
   updateNaturalStatus();
 }
 
@@ -1776,8 +1793,10 @@ function updateMediaSession() {
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
+    local.remove(CRASH_KEY);
     if (state.book) place.set(state.book, state.position, { flush: true });
   } else {
+    if (natural.loading && !NATURAL.make) local.set(CRASH_KEY, Date.now());
     // Time spent in the background doesn't count against the voice
     natural.lastHeard = Date.now();
     if (state.playing || whole.running) holdScreen(whole.running);
@@ -2128,7 +2147,20 @@ function sampleStory() {
 
 // ---------- Start ----------
 
+window.addEventListener("pagehide", () => local.remove(CRASH_KEY));
+
 (async function start() {
+  if (local.get(CRASH_KEY, null)) {
+    // Crashed while the natural voice was running: don't start it again by itself
+    local.remove(CRASH_KEY);
+    local.set("naturalReady", false);
+    if (isNatural(settings.voice)) {
+      settings.voice = "";
+      local.set("settings", settings);
+    }
+    $("#crash-note").hidden = false;
+  }
+  $("#crash-ok").addEventListener("click", () => { $("#crash-note").hidden = true; });
   state.books = await shelfStore.all();
   renderShelf();
   place.connect();

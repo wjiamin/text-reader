@@ -103,6 +103,38 @@ class KokoroVoice:
         return samples
 
 
+class TorchKokoroVoice:
+    """Kokoro through PyTorch, for a graphics chip such as Google Colab's.
+
+    Uses the `kokoro` package, which downloads its model on first use.
+    """
+
+    sample_rate = 24000
+
+    def __init__(self, voice: str = DEFAULT_VOICE, speed: float = 1.0):
+        if not 0.5 <= speed <= 2.0:
+            raise ValueError("Speed must be between 0.5 and 2.0")
+        self.voice = voice
+        self.speed = speed
+        self.key = f"kokoro-torch/{voice}/{speed:g}"
+        self._pipeline = None
+
+    def load(self) -> None:
+        if self._pipeline is None:
+            from kokoro import KPipeline
+
+            self._pipeline = KPipeline(lang_code=self.voice[:1], repo_id="hexgrad/Kokoro-82M")
+
+    def speak(self, text: str) -> np.ndarray:
+        self.load()
+        parts = []
+        for result in self._pipeline(text, voice=self.voice, speed=self.speed):
+            audio = result.audio if hasattr(result, "audio") else result[2]
+            if audio is not None:
+                parts.append(audio.detach().cpu().numpy() if hasattr(audio, "detach") else np.asarray(audio))
+        return np.concatenate(parts).astype(np.float32) if parts else np.zeros(0, dtype=np.float32)
+
+
 @functools.cache
 def _engine(model_path: str, voices_path: str):
     # Loading takes a few seconds, so voices that share a model share one engine
