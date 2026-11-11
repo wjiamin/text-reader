@@ -169,6 +169,18 @@
   .notice { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; }
   .quiet.small { min-height: 36px; font-size: 0.85rem; margin-top: 8px; }
   .natural-status { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .offline-card {
+    display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 14px;
+    border-radius: 12px; background: var(--surface); border: 1px solid var(--rule);
+  }
+  .offline-card > div { flex: 1; min-width: 0; }
+  .offline-card p { margin: 2px 0 0; }
+  .offline-card .quiet.small { margin-top: 0; flex: none; }
+  .prepare { margin-top: 6px; }
+  .prepare-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 0.85rem; font-weight: 600; }
+  .text-button { border: 0; background: none; color: var(--accent); font-weight: 600; padding: 6px 0 6px 12px; min-height: 32px; }
+  .prepare-meter { height: 6px; border-radius: 3px; margin-top: 4px; }
+  .prepare .notice { font-variant-numeric: tabular-nums; }
   .natural-settings { border-top: 1px solid var(--rule); margin-top: 6px; padding-top: 4px; }
   .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
   .all-voices {
@@ -211,10 +223,17 @@
         <p>Your iPhone stops a web page from talking when the screen locks, so this reader keeps the screen on while it reads.</p>
       </details>
       <p id="sync-note" class="sync">Your place is saved on this phone.</p>
-      <p class="sync">Fic Listener version 5</p>
+      <p class="sync">Fic Listener version 6</p>
     </section>
 
     <section id="reader-view" class="reader" hidden>
+      <div id="offline-card" class="offline-card" hidden>
+        <div>
+          <strong id="offline-title">Listen offline</strong>
+          <p id="offline-text" class="notice"></p>
+        </div>
+        <button id="prepare-start" class="quiet small" type="button">Prepare the rest</button>
+      </div>
       <div class="chapter-pick" id="chapter-pick">
         <label for="chapter" class="visually-hidden">Chapter</label>
         <select id="chapter"></select>
@@ -229,6 +248,15 @@
   <div class="wrap">
     <div class="where"><span id="where"></span><span id="saved"></span></div>
     <p id="natural-status" class="notice natural-status" role="status" hidden></p>
+    <div id="prepare" class="prepare" hidden>
+      <div class="prepare-head">
+        <span>Preparing the rest of the story</span>
+        <button id="prepare-stop" class="text-button" type="button">Stop</button>
+      </div>
+      <div class="meter prepare-meter" role="progressbar" aria-label="Preparing the rest of the story"
+           aria-valuemin="0" aria-valuemax="100"><span id="prepare-bar"></span></div>
+      <p id="prepare-detail" class="notice"></p>
+    </div>
     <div class="controls">
       <button id="prev-chapter" class="icon" type="button" aria-label="Previous chapter">
         <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
@@ -294,9 +322,9 @@
             </select>
           </label>
         </div>
-        <p class="notice">The natural voice is made on this phone, so it downloads once and then works offline. Prepared parts play with the screen locked; making new ones needs this page open. If your phone makes audio slower than you listen, tap “Prepare ahead now” while it charges.</p>
+        <p class="notice">The natural voice is made on this phone, so it downloads once and then works offline. Prepared parts play with the screen locked; making new ones needs this page open. If your phone makes audio slower than you listen, prepare the rest of the story while it charges.</p>
         <div class="button-row">
-          <button id="prepare-now" class="quiet small" type="button">Prepare ahead now</button>
+          <button id="prepare-now" class="quiet small" type="button">Prepare the rest of the story</button>
           <button id="clear-clips" class="quiet small" type="button">Delete prepared audio</button>
         </div>
       </div>
@@ -1075,9 +1103,91 @@ function preparedAhead() {
   return seconds;
 }
 
+// Preparing the whole rest of the story ahead of time, with progress to watch
+const whole = { running: false, stop: false, book: null, lines: [], error: "" };
+
+async function prepareStory() {
+  if (whole.running || !state.book || !isNatural(settings.voice)) return;
+  Object.assign(whole, { running: true, stop: false, book: state.book, lines: [...upcoming()], error: "" });
+  const voice = settings.voice;
+  holdScreen(true);
+  // Ask the phone not to clear the prepared audio when it's short of space
+  navigator.storage?.persist?.().catch(() => {});
+  updatePrepare();
+  try {
+    for (const line of whole.lines) {
+      if (whole.stop || state.book !== whole.book || settings.voice !== voice) break;
+      if (!clips.times.has(line.key)) await clips.make(whole.book, voice, line.c, line.item, line.key);
+      local.set("naturalReady", true);
+      updatePrepare();
+      updateNaturalStatus();
+    }
+  } catch (error) {
+    whole.error = error.message;
+  } finally {
+    whole.running = false;
+    if (!state.playing) releaseScreen();
+    updatePrepare();
+  }
+}
+
+// Seconds it would take to say these lines, at about 160 words a minute
+const WORDS_PER_MINUTE = 160;
+const sayingTime = (lines) => lines.reduce((sum, line) => sum + words(line.item.text), 0) * 60 / WORDS_PER_MINUTE;
+
+let storageNote = "";
+async function updatePrepare() {
+  const box = $("#prepare");
+  const card = $("#offline-card");
+  if (!state.book || !isNatural(settings.voice)) {
+    box.hidden = card.hidden = true;
+    return;
+  }
+  const lines = whole.running ? whole.lines : [...upcoming()];
+  const left = lines.filter((line) => !clips.times.has(line.key));
+  const share = lines.length ? (lines.length - left.length) / lines.length : 1;
+  const percent = Math.floor(share * 100);
+
+  box.hidden = !whole.running;
+  card.hidden = whole.running;
+  $("#prepare-bar").style.width = `${percent}%`;
+  box.querySelector("[role=progressbar]").setAttribute("aria-valuenow", String(percent));
+  if (whole.running) {
+    const speed = natural.speed;
+    const time = speed
+      ? `about ${formatMinutes(sayingTime(left) / speed)} left`
+      : "working out how long it will take";
+    $("#prepare-detail").textContent =
+      `${percent}% · ${lines.length - left.length} of ${lines.length} parts · ${time}. Keep this page open, ideally plugged in.`;
+    return;
+  }
+
+  const button = $("#prepare-start");
+  if (whole.error && whole.book === state.book) {
+    $("#offline-title").textContent = "Preparing stopped";
+    $("#offline-text").textContent = whole.error;
+    button.textContent = "Try again";
+    button.hidden = false;
+  } else if (!left.length) {
+    $("#offline-title").textContent = "Ready to listen offline";
+    $("#offline-text").textContent = `The rest of this story is prepared.${storageNote}`;
+    button.hidden = true;
+    const estimate = await navigator.storage?.estimate?.().catch(() => null);
+    const note = estimate?.usage ? ` It takes about ${Math.round(estimate.usage / 2 ** 20)} MB on this phone.` : "";
+    if (note !== storageNote) { storageNote = note; $("#offline-text").textContent = `The rest of this story is prepared.${note}`; }
+  } else {
+    $("#offline-title").textContent = "Listen offline";
+    $("#offline-text").textContent = percent > 0
+      ? `${percent}% of the rest is prepared. Prepare the rest to listen without waiting, offline, with the screen locked.`
+      : "Prepare the rest of this story ahead of time. Then it plays without waiting, offline, and with the screen locked.";
+    button.textContent = percent > 0 ? "Carry on" : "Prepare the rest";
+    button.hidden = false;
+  }
+}
+
 const preparing = { running: false, manual: false };
 async function prepareAhead() {
-  if (preparing.running || !state.book || !isNatural(settings.voice)) return;
+  if (whole.running || preparing.running || !state.book || !isNatural(settings.voice)) return;
   if (!state.playing && !preparing.manual && !local.get("naturalReady", false)) return;
   preparing.running = true;
   try {
@@ -1297,7 +1407,13 @@ for (const [key, selector] of Object.entries(settingInputs)) {
     local.set("settings", settings);
     if (key === "summary" || key === "notes") { renderChapter(); if (state.playing) restartAt(state.position); }
     if (key === "rate") player.playbackRate = Number(settings.rate) || 1;
-    if (key === "voice") { showVoiceSettings(); if (state.playing) restartAt(state.position); prepareAhead(); }
+    if (key === "voice") {
+      whole.stop = true;
+      showVoiceSettings();
+      updatePrepare();
+      if (state.playing) restartAt(state.position);
+      prepareAhead();
+    }
     if (key === "rate" && state.playing && !isNatural(settings.voice)) restartAt(state.position);
     if (key === "engine") natural.reset();
     if (key === "ahead") prepareAhead();
@@ -1358,7 +1474,7 @@ function pause({ save = true } = {}) {
   state.gap = null;
   if (synth) synth.cancel();
   player.pause();
-  if (!preparing.manual) releaseScreen();
+  if (!preparing.manual && !whole.running) releaseScreen();
   keepAlive.stop();
   setPlayButton();
   if (save && state.book) place.set(state.book, state.position, { flush: true });
@@ -1494,8 +1610,8 @@ setInterval(() => {
 // ---------- Screen and lock screen ----------
 
 let wakeLock = null;
-async function holdScreen() {
-  if (!settings.awake || !navigator.wakeLock || document.hidden) return;
+async function holdScreen(always = false) {
+  if ((!settings.awake && !always) || !navigator.wakeLock || document.hidden) return;
   try { wakeLock = await navigator.wakeLock.request("screen"); } catch { wakeLock = null; }
 }
 function releaseScreen() {
@@ -1552,7 +1668,7 @@ document.addEventListener("visibilitychange", () => {
   } else {
     // Time spent in the background doesn't count against the voice
     natural.lastHeard = Date.now();
-    if (state.playing) holdScreen();
+    if (state.playing || whole.running) holdScreen(whole.running);
     // Coming back from Settings after downloading a voice
     if (state.book) { watchVoices(); prepareAhead(); }
   }
@@ -1623,10 +1739,11 @@ function openBook(book) {
   openChapter(c, saved ? saved.b : 0);
   scrollToCurrent(true);
   clips.times = new Map();
-  clips.index(book).then(() => { updateNaturalStatus(); prepareAhead(); });
+  clips.index(book).then(() => { updateNaturalStatus(); updatePrepare(); prepareAhead(); });
 }
 
 function closeBook() {
+  whole.stop = true;
   pause();
   state.book = null;
   $("#heading").textContent = "Fic Listener";
@@ -1647,6 +1764,7 @@ function openChapter(c, b) {
   window.scrollTo(0, 0);
   updateWhere();
   updateMediaSession();
+  updatePrepare();
   $("#prev-chapter").disabled = c === 0;
   $("#next-chapter").disabled = c >= state.book.chapters.length - 1;
   $("#next-inline").hidden = c >= state.book.chapters.length - 1;
@@ -1864,17 +1982,16 @@ if (synth) {
   synth.addEventListener?.("voiceschanged", () => { if (state.book) loadVoices(); });
 }
 $("#list-voices").addEventListener("click", listAllVoices);
-$("#prepare-now").addEventListener("click", () => {
-  preparing.manual = true;
-  holdScreen();
-  showNaturalStatus("Preparing… keep this page open.");
-  prepareAhead();
-});
+$("#prepare-now").addEventListener("click", prepareStory);
+$("#prepare-start").addEventListener("click", prepareStory);
+$("#prepare-stop").addEventListener("click", () => { whole.stop = true; });
 $("#clear-clips").addEventListener("click", async () => {
   if (!state.book) return;
+  whole.stop = true;
   await shelfStore.dropClips(state.book.id);
   clips.times = new Map();
   updateNaturalStatus();
+  updatePrepare();
 });
 $("#settings").addEventListener("toggle", () => { if ($("#settings").open && state.book) watchVoices(); });
 

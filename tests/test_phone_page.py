@@ -430,3 +430,44 @@ def test_natural_voice_works_without_stream_looping_like_safari(browser, site, t
     assert page.evaluate("natural.mode") == "page"
     assert page.errors == []
     page.context.close()
+
+
+def test_prepare_the_rest_of_the_story_with_progress(natural_page, tmp_path):
+    page = natural_page
+    open_epub(page, multi_chapter(tmp_path / "work.epub"))
+    page.wait_for_selector("#offline-card:not([hidden])")
+    assert page.inner_text("#prepare-start") == "Prepare the rest"
+
+    page.click("#prepare-start")
+    page.wait_for_selector("#prepare:not([hidden])")
+    page.wait_for_function("document.querySelector('#prepare-detail').textContent.includes('of 14 parts')")
+    page.wait_for_function("document.querySelector('#offline-title').textContent === 'Ready to listen offline'",
+                           timeout=60000)
+    assert page.is_hidden("#prepare")
+    assert page.evaluate("window.__made") == EXPECTED_STORY
+
+    # Everything plays from what was prepared, with nothing more to make
+    read_to_end(page)
+    assert len(page.evaluate("window.__made")) == len(EXPECTED_STORY)
+
+
+def test_stopping_and_carrying_on(natural_page, tmp_path):
+    page = natural_page
+    open_epub(page, multi_chapter(tmp_path / "work.epub"))
+    page.wait_for_selector("#offline-card:not([hidden])")
+    page.click("#prepare-start")
+    page.wait_for_function("window.__made.length >= 3")
+    page.click("#prepare-stop")
+    page.wait_for_selector("#offline-card:not([hidden])")
+    assert page.inner_text("#prepare-start") == "Carry on"
+    assert "% of the rest is prepared" in page.inner_text("#offline-text")
+
+    page.reload()
+    page.wait_for_selector(".book")
+    page.click("[data-open]")
+    page.wait_for_function("document.querySelector('#prepare-start').textContent === 'Carry on'")
+    page.click("#prepare-start")
+    page.wait_for_function("document.querySelector('#offline-title').textContent === 'Ready to listen offline'",
+                           timeout=60000)
+    # Parts made before stopping weren't made again
+    assert 0 < len(page.evaluate("window.__made")) < len(EXPECTED_STORY)
