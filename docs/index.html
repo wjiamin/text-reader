@@ -238,7 +238,7 @@
         <p>Your iPhone stops a web page from talking when the screen locks, so this reader keeps the screen on while it reads.</p>
       </details>
       <p id="sync-note" class="sync">Your place is saved on this phone.</p>
-      <p class="sync">Fic Listener version 6</p>
+      <p class="sync">Fic Listener version 7</p>
     </section>
 
     <section id="reader-view" class="reader" hidden>
@@ -747,6 +747,26 @@ const shelfStore = {
       request.onerror = () => reject(request.error);
     });
   },
+  async clipsByKey(keys) {
+    const rows = new Map();
+    if (!keys.length) return rows;
+    try {
+      const db = await this.open();
+      await new Promise((resolve, reject) => {
+        const store = db.transaction("clips").objectStore("clips");
+        let left = keys.length;
+        for (const key of keys) {
+          const request = store.get(key);
+          request.onsuccess = () => {
+            if (request.result) rows.set(key, request.result);
+            if (--left === 0) resolve();
+          };
+          request.onerror = () => reject(request.error);
+        }
+      });
+    } catch { /* storage blocked */ }
+    return rows;
+  },
   // [key, seconds] for every prepared line of a story
   async clipTimes(bookId) {
     const rows = [];
@@ -1068,7 +1088,7 @@ const clips = {
       const work = (async () => {
         const { pcm, rate } = await natural.make(item.text, voice.slice("kokoro:".length));
         const pause = Math.round((rate * item.pause) / 1000);
-        const row = { key, book: book.id, c, seconds: (pcm.length + pause) / rate, blob: wavBlob(pcm, rate, pause) };
+        const row = { key, book: book.id, c, rate, seconds: (pcm.length + pause) / rate, blob: wavBlob(pcm, rate, pause) };
         try {
           await shelfStore.putClip(row);
           this.times.set(key, row.seconds);
@@ -1083,19 +1103,35 @@ const clips = {
   },
 };
 
-function wavBlob(pcm, rate, silence = 0) {
-  const samples = pcm.length + silence;
-  const buffer = new ArrayBuffer(44 + samples * 2);
+// A 44-byte header for mono 16-bit audio, then the sound itself
+function wavHeader(buffer, samples, rate) {
   const view = new DataView(buffer);
   const text = (offset, value) => [...value].forEach((ch, i) => view.setUint8(offset + i, ch.charCodeAt(0)));
   text(0, "RIFF"); view.setUint32(4, 36 + samples * 2, true); text(8, "WAVE");
   text(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
   view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
   text(36, "data"); view.setUint32(40, samples * 2, true);
+  return view;
+}
+
+function wavBlob(pcm, rate, silence = 0) {
+  const samples = pcm.length + silence;
+  const buffer = new ArrayBuffer(44 + samples * 2);
+  const view = wavHeader(buffer, samples, rate);
   for (let i = 0; i < pcm.length; i++) {
     view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
   }
   return new Blob([buffer], { type: "audio/wav" });
+}
+
+// Several prepared parts as one file. The browser stitches the pieces
+// together itself, so nothing is copied into memory here.
+function joinedWav(rows) {
+  const rate = rows[0].rate || 24000;
+  const bytes = rows.reduce((sum, row) => sum + row.blob.size - 44, 0);
+  const header = new ArrayBuffer(44);
+  wavHeader(header, bytes / 2, rate);
+  return new Blob([header, ...rows.map((row) => row.blob.slice(44))], { type: "audio/wav" });
 }
 
 // The upcoming lines, from the current place onward, with how much is already prepared
@@ -1249,6 +1285,10 @@ function updateNaturalStatus() {
   const speed = natural.speed;
   if (speed) {
     parts.push(`your phone makes audio at ${speed.toFixed(1)}× listening speed`);
+    // Slower than listening: it will pause to catch up unless the story is prepared first
+    if (speed < 1 && !whole.running && [...upcoming()].some((line) => !clips.times.has(line.key))) {
+      parts.push("tap Prepare the rest to listen without stops");
+    }
   }
   if (preparing.running && !parts.length) parts.push("Making the natural voice…");
   showNaturalStatus(parts.join(" · "));
@@ -1514,7 +1554,7 @@ function speakNext() {
   const item = state.queue[state.index];
   const token = ++state.token;
   moveTo({ c: state.position.c, b: item.b });
-  if (isNatural(settings.voice)) return playNatural(item, token);
+  if (isNatural(settings.voice)) return playNatural(token);
 
   const utterance = new SpeechSynthesisUtterance(item.text);
   const voice = currentVoice();
@@ -1537,23 +1577,53 @@ function speakNext() {
   synth.speak(utterance);
 }
 
-async function playNatural(item, token) {
+// How much to have ready before playing: nothing extra on a phone that keeps
+// up, a couple of minutes on one that doesn't, so it pauses now and then
+// instead of before every part
+function bufferTarget() {
+  const speed = natural.speed;
+  return speed && speed < 1.1 ? 120 : 0;
+}
+
+let playerUrl = null;
+
+// Plays from the current part through every part already prepared, as one
+// file: no gaps between parts, and it carries on with the screen locked
+async function playNatural(token) {
   const book = state.book;
   const c = state.position.c;
   const voice = settings.voice;
+  const queue = state.queue;
+  const first = state.index;
+  const target = bufferTarget();
+  const keyAt = (i) => clips.key(book, voice, c, queue[i]);
+
   let ticker = null;
-  if (!clips.times.has(clips.key(book, voice, c, item))) {
-    // Say what it's doing, with a running count, so a slow phone doesn't look stuck
-    const since = Date.now();
-    const show = () => {
-      if (token === state.token) showNaturalStatus(`${natural.describe()} ${Math.round((Date.now() - since) / 1000)} s`);
-    };
-    show();
-    ticker = setInterval(show, 1000);
-  }
-  let row;
+  let ready = 0;
+  const since = Date.now();
+  const show = () => {
+    if (token !== state.token) return;
+    const waited = `${Math.round((Date.now() - since) / 1000)} s`;
+    showNaturalStatus(natural.loading && natural.stage === "making" && target
+      ? `Buffering: ${Math.round(ready)} of ${target} s ready · ${waited}`
+      : `${natural.describe()} ${waited}`);
+  };
+
+  const made = new Map();
+  let last = first;
   try {
-    row = await clips.load(book, voice, c, item);
+    while (last < queue.length) {
+      const key = keyAt(last);
+      if (!clips.times.has(key) && !made.has(key)) {
+        // Enough is ready: the rest gets made while this plays
+        if (last > first && ready >= target) break;
+        if (!ticker) { show(); ticker = setInterval(show, 1000); }
+        made.set(key, await clips.make(book, voice, c, queue[last], key));
+        if (token !== state.token || !state.playing) return;
+      }
+      ready += clips.times.get(key) ?? made.get(key).seconds;
+      last++;
+    }
   } catch (error) {
     if (token === state.token) {
       pause();
@@ -1563,18 +1633,45 @@ async function playNatural(item, token) {
   } finally {
     clearInterval(ticker);
   }
+
+  const keys = [];
+  for (let i = first; i < last; i++) keys.push(keyAt(i));
+  const stored = await shelfStore.clipsByKey(keys.filter((key) => !made.has(key)));
   if (token !== state.token || !state.playing) return;
+  const rows = keys.map((key) => made.get(key) || stored.get(key));
+  if (rows.some((row) => !row)) {
+    // Prepared audio went missing (cleared by the phone); make it again
+    clips.times = new Map(await shelfStore.clipTimes(book.id));
+    if (token === state.token && state.playing) restartAt(state.position);
+    return;
+  }
   local.set("naturalReady", true);
-  const url = URL.createObjectURL(row.blob);
+
+  // When each part starts, to follow along in the text
+  const starts = [];
+  let at = 0;
+  for (const row of rows) { starts.push(at); at += row.seconds; }
+  let showing = 0;
+
+  if (playerUrl) URL.revokeObjectURL(playerUrl);
+  playerUrl = URL.createObjectURL(rows.length === 1 ? rows[0].blob : joinedWav(rows));
+  player.ontimeupdate = () => {
+    if (token !== state.token) return;
+    let part = showing;
+    while (part + 1 < starts.length && player.currentTime >= starts[part + 1]) part++;
+    if (part !== showing) {
+      showing = part;
+      moveTo({ c, b: queue[first + part].b });
+    }
+  };
   const next = () => {
-    URL.revokeObjectURL(url);
     if (token !== state.token || !state.playing) return;
-    state.index++;
+    state.index = last;
     speakNext();
   };
   player.onended = next;
   player.onerror = next;
-  player.src = url;
+  player.src = playerUrl;
   player.playbackRate = Number(settings.rate) || 1;
   player.preservesPitch = true;
   try {

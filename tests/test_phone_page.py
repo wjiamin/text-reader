@@ -471,3 +471,32 @@ def test_stopping_and_carrying_on(natural_page, tmp_path):
                            timeout=60000)
     # Parts made before stopping weren't made again
     assert 0 < len(page.evaluate("window.__made")) < len(EXPECTED_STORY)
+
+
+COUNT_AUDIO_FILES = """
+window.__files = 0;
+const source = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src");
+Object.defineProperty(HTMLMediaElement.prototype, "src", {
+  get() { return source.get.call(this); },
+  set(value) { window.__files++; source.set.call(this, value); },
+});
+"""
+
+
+def test_prepared_parts_play_as_one_continuous_file(browser, site, tmp_path):
+    page = new_page(browser, site, FAKE_SPEECH, FAKE_NATURAL, COUNT_AUDIO_FILES)
+    open_epub(page, multi_chapter(tmp_path / "work.epub"))
+    page.wait_for_selector("#offline-card:not([hidden])")
+    page.click("#prepare-start")
+    page.wait_for_function("document.querySelector('#offline-title').textContent === 'Ready to listen offline'",
+                           timeout=60000)
+    page.evaluate("window.__files = 0")
+
+    page.click("#play")
+    # The highlight still follows each paragraph through the joined file
+    page.wait_for_function("document.querySelector('#text .current')?.textContent.startsWith('By morning')")
+    page.wait_for_function("document.querySelector('#where').textContent.includes('end of the story')")
+    # A moment of silence to start the player, then one file per chapter
+    assert page.evaluate("window.__files") <= 3
+    assert page.errors == []
+    page.context.close()
