@@ -138,7 +138,15 @@ class TorchKokoroVoice:
 @functools.cache
 def _engine(model_path: str, voices_path: str):
     # Loading takes a few seconds, so voices that share a model share one engine
+    import onnxruntime
     from kokoro_onnx import Kokoro
+
+    # The graphics-chip build finds its CUDA libraries in pip packages this way
+    if "CUDAExecutionProvider" in onnxruntime.get_available_providers() and hasattr(onnxruntime, "preload_dlls"):
+        try:
+            onnxruntime.preload_dlls()
+        except Exception:
+            pass
 
     return Kokoro(model_path, voices_path)
 
