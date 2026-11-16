@@ -6,6 +6,7 @@ calls make() and downloads the result.
 """
 
 import importlib
+import logging
 import os
 import sys
 from pathlib import Path
@@ -39,6 +40,11 @@ def onnx_on_graphics_chip() -> bool:
     except ImportError:
         return False
     return "CUDAExecutionProvider" in onnxruntime.get_available_providers()
+
+
+# The pronunciation step warns about harmless word-count mismatches, often
+# enough to bury the progress lines
+logging.getLogger("phonemizer").setLevel(logging.ERROR)
 
 
 def _prefer_graphics_chip() -> None:
