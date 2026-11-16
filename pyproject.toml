@@ -7,7 +7,7 @@ name = "ao3-reader"
 version = "0.1.0"
 description = "Turn Archive of Our Own works into audiobooks, read by a natural-sounding voice that runs on your own computer."
 readme = "README.md"
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.10"
 dependencies = [
     "beautifulsoup4>=4.12",
     "httpx>=0.27",
